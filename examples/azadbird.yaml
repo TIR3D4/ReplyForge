@@ -80,8 +80,8 @@ workflows:
         input: choice
         field: has_sms
         options:
-          - {label: "📩 بله، ارسال می‌کنم", value: yes, next: sms}
-          - {label: "❌ ندارم", value: no, next: human}
+          - {label: "📩 بله، ارسال می‌کنم", value: "yes", next: sms}
+          - {label: "❌ ندارم", value: "no", next: human}
       sms:
         prompt: "لطفاً تصویر پیامک برداشت رو بفرست. این مدرک به‌تنهایی اثبات واریز به فروشگاه نیست و پشتیبان بررسی می‌کنه."
         input: photo
