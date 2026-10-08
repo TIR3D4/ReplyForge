@@ -225,7 +225,9 @@ class Processor:
                 Message.conversation_id == conv.id,
                 Message.telegram_message_id == msg_id,
                 Message.direction == "out",
-            )) is None:
+            )) is not None:
+                return
+            if msg_id is not None:
                 session.add(Message(
                     conversation_id=conv.id, telegram_message_id=msg_id,
                     direction="out", kind="human",
