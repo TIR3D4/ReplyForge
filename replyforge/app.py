@@ -63,7 +63,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 engine.dispose()
 
     app = FastAPI(
-        title="ReplyForge", version="0.1.0", docs_url=None, redoc_url=None,
+        title="ReplyForge", version="1.0.0rc1", docs_url=None, redoc_url=None,
         lifespan=lifespan,
     )
 
