@@ -65,10 +65,26 @@ button.secondary{background:#38455d}form{display:inline}
 {% endif %}
 <section class="card">
 <h2>{{ _('Human operator reply', 'پاسخ اپراتور انسانی') }}</h2>
+<p>{{ _('Optional AI assistance prepares a draft; only you decide what to send.', 'دستیار AI فقط متن پیشنهادی می‌سازد؛ ارسال نهایی با تأیید شماست.') }}</p>
+<form method="post" action="/admin/conversations/{{ conv.id }}/suggest">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button class="secondary" type="submit">✨ {{ _('Suggest reply', 'پیشنهاد پاسخ با AI') }}</button>
+</form>
+{% if draft %}
+<div class="note" style="margin:12px 0">
+<strong>✨ {{ _('Draft for review', 'پیش‌نویس برای بررسی') }}</strong> · <small>{{ draft.source }}</small>
+<p>{{ _('Verify facts and edit before sending, especially payments and subscription status.', 'قبل از ارسال، صحت اطلاعات خصوصاً وضعیت پرداخت و اشتراک را بررسی و متن را ویرایش کنید.') }}</p>
+<form method="post" action="/admin/conversations/{{ conv.id }}/draft/{{ draft.id }}/dismiss">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button type="submit" class="secondary">{{ _('Discard suggestion', 'رد پیشنهاد') }}</button>
+</form></div>
+{% endif %}
+
 <p>{{ _('Sending claims this chat for a human and checks business permissions.', 'با ارسال پاسخ، گفتگو به اپراتور واگذار می‌شود و مجوز تلگرام بررسی خواهد شد.') }}</p>
 <form method="post" action="/admin/conversations/{{ conv.id }}/reply" style="display:grid;gap:12px">
 <input type="hidden" name="csrf_token" value="{{ csrf }}">
-<textarea name="message" maxlength="3500" rows="4" required placeholder="{{ _('Write your message…', 'پیام را بنویسید…') }}" style="width:100%;padding:12px;border-radius:10px;background:#0b1525;color:white;border:1px solid #38455d;resize:vertical"></textarea>
+{% if draft %}<input type="hidden" name="draft_id" value="{{ draft.id }}">{% endif %}
+<textarea name="message" maxlength="3500" rows="4" required placeholder="{{ _('Write your message…', 'پیام را بنویسید…') }}" style="width:100%;padding:12px;border-radius:10px;background:#0b1525;color:white;border:1px solid #38455d;resize:vertical">{{ draft.text if draft else '' }}</textarea>
 <div><button type="submit">{{ _('Send from Business account', 'ارسال از اکانت پشتیبانی') }}</button></div>
 </form>
 {% if outbound %}
