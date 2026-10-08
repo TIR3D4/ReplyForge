@@ -18,7 +18,7 @@ from .security import redact
 from .playbooks import effective_playbook
 from .telegram import TelegramClient, TelegramError
 from .workflow import (
-    accept_input, apply_action, build_markup, callback_action, root_menu
+    Proposal, accept_input, apply_action, build_markup, callback_action, root_menu
 )
 
 log = logging.getLogger(__name__)
@@ -93,10 +93,14 @@ def record_inbound(session: Session, conv: Conversation, message: dict) -> bool:
     file_id = photo[-1].get("file_id") if photo else (
         document.get("file_id") if str(document.get("mime_type", "")).startswith("image/") else None
     )
+    voice = message.get("voice") or message.get("audio") or {}
+    if not file_id and isinstance(voice, dict):
+        file_id = voice.get("file_id")
+    kind = "voice" if voice else ("photo" if file_id else "text")
     text = message.get("text") or message.get("caption") or ""
     session.add(Message(
         conversation_id=conv.id, telegram_message_id=msg_id,
-        direction="in", content=redact(text), kind="photo" if file_id else "text",
+        direction="in", content=redact(text), kind=kind,
         data={"file_id": file_id} if file_id else {},
     ))
     conv.last_inbound_at = utcnow()
@@ -228,7 +232,54 @@ class Processor:
             document.get("file_id") if str(document.get("mime_type", "")).startswith("image/") else None
         )
         text = message.get("text") or message.get("caption") or ""
-        proposal = accept_input(session, conv, playbook, self._agent(session, conv), self.settings, text, file_id)
+        ai = self._agent(session, conv)
+        voice = message.get("voice") or message.get("audio") or {}
+        if isinstance(voice, dict) and voice.get("file_id"):
+            try:
+                data = self.telegram.download(str(voice["file_id"]), self.settings.media_max_bytes)
+                transcript = ai.transcribe_voice(data)
+            except (TelegramError, ValueError, TypeError, AttributeError):
+                transcript = None
+            if transcript:
+                text = transcript
+            else:
+                proposal = Proposal(
+                    "🎙 ویست دریافت شد. لطفاً مشکل رو متنی بنویس یا اپراتور رو انتخاب کن."
+                    if playbook.get("locale") == "fa" else
+                    "🎙 Voice received. Please type your question or choose human support.",
+                    [("👨‍💻 اپراتور", "human"),
+                     ("🏠 منو", "home")],
+                )
+                conv.state = {**(conv.state or {}), "_playbook_version": version}
+                save_proposal(session, conv, proposal)
+                return
+        photo_expected = bool(
+            conv.workflow and conv.step and
+            playbook["workflows"].get(conv.workflow, {}).get("states", {})
+                .get(conv.step, {}).get("input") == "photo"
+        )
+        # Financial/payment evidence is NEVER sent to third-party vision APIs.
+        if (file_id and not photo_expected and conv.workflow != "payment"
+                and self.settings.vision_enabled):
+            try:
+                content = self.telegram.download(str(file_id), self.settings.media_max_bytes)
+                observation = ai.describe_screenshot(content)
+            except (TelegramError, ValueError, TypeError, AttributeError):
+                observation = None
+            if observation:
+                info = dict(conv.state or {})
+                info["screenshot_clues"] = observation
+                conv.state = info
+                text = (text + "\n" if text else "") + "مشاهده از اسکرین‌شات: " + observation
+        if file_id and not text and not photo_expected:
+            proposal = Proposal(
+                "📷 تصویر رو دریافت کردم. لطفاً بگو مربوط به کدوم مشکل هست یا موضوع رو از منو انتخاب کن."
+                if playbook.get("locale") == "fa" else
+                "📷 Image received. Tell me what went wrong or select a menu option.",
+                [("🏠 منوی اصلی", "home"), ("👨‍💻 اپراتور", "human")],
+            )
+        else:
+            proposal = accept_input(session, conv, playbook, ai, self.settings, text, file_id)
         conv.state = {**(conv.state or {}), "_playbook_version": version}
         save_proposal(session, conv, proposal)
         self._queue_operator_alert(session, conv)
