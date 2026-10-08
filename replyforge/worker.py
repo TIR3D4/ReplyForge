@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .agent import AIEngine
+from .ai_policy import effective_settings
 from .config import Settings, load_playbook
 from .database import claim, session_scope
 from .models import (
@@ -140,6 +141,7 @@ class Processor:
 
     def _agent(self, session: Session, conv: Conversation) -> AIEngine:
         """Create a chat-scoped model budget and audit every attempted model call."""
+        configured = effective_settings(session, self.settings)
         def permit_call() -> bool:
             if not self.settings.ai_api_key:
                 return False
@@ -149,13 +151,13 @@ class Processor:
                 Audit.action == "ai_call",
                 Audit.created_at >= since,
             )) or 0
-            if used >= self.settings.max_llm_calls_per_chat_per_day:
+            if used >= configured.max_llm_calls_per_chat_per_day:
                 return False
             session.add(Audit(conversation_id=conv.id, actor="system", action="ai_call"))
             session.flush()
             return True
 
-        return AIEngine(self.settings, allow_call=permit_call)
+        return AIEngine(configured, allow_call=permit_call)
 
     def _process_payload(self, session: Session, payload: dict,
                          *, batch_messages: list[dict] | None = None) -> None:
@@ -319,7 +321,7 @@ class Processor:
         )
         # Financial/payment evidence is NEVER sent to third-party vision APIs.
         if (file_id and not photo_expected and conv.workflow == "connection"
-                and self.settings.vision_enabled):
+                and ai.settings.vision_enabled):
             try:
                 content = self.telegram.download(str(file_id), self.settings.media_max_bytes)
                 observation = ai.describe_screenshot(content)

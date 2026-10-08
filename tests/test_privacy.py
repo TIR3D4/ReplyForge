@@ -47,7 +47,7 @@ def test_retention_scrubs_text_and_file_ids_but_not_recent_records(database):
         result = prune_history(db, retention_days=180)
         assert result == {
             "messages": 1, "outbox": 1, "notes": 1, "drafts": 1, "suggestions": 1,
-            "ticket_summaries": 1,
+            "ticket_summaries": 1, "insight_candidates": 0,
         }
     with session_scope(database) as db:
         messages = db.scalars(select(Message).order_by(Message.id)).all()

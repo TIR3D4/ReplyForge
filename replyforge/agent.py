@@ -42,25 +42,33 @@ class AIEngine:
     def _complete(self, system: str, user: str) -> str | None:
         if not self.settings.ai_api_key:
             return None
-        if self.allow_call is not None and not self.allow_call():
-            return None
-        try:
-            with httpx.Client(base_url=self.settings.ai_base_url.rstrip("/") + "/", timeout=12,
-                              transport=self.transport, follow_redirects=False) as client:
-                r = client.post("chat/completions", json={
-                    "model": self.settings.ai_model,
-                    "temperature": 0,
-                    "max_tokens": 250,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": redact(user)[:1800]},
-                    ],
-                }, headers={"Authorization": "Bearer " + self.settings.ai_api_key})
-                r.raise_for_status()
-                return str(r.json()["choices"][0]["message"]["content"])
-        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
-            log.warning("model unavailable: %s", type(exc).__name__)
-            return None
+        models = list(dict.fromkeys([self.settings.ai_model, self.settings.ai_fallback_model]))
+        for model in filter(None, models):
+            if self.allow_call is not None and not self.allow_call():
+                return None
+            try:
+                with httpx.Client(base_url=self.settings.ai_base_url.rstrip("/") + "/", timeout=12,
+                                  transport=self.transport, follow_redirects=False) as client:
+                    r = client.post("chat/completions", json={
+                        "model": model, "temperature": 0,
+                        "max_tokens": self.settings.ai_max_output_tokens,
+                        "messages": [
+                            {"role": "system", "content": system[:8000]},
+                            {"role": "user", "content": redact(user)[-3500:]},
+                        ],
+                    }, headers={"Authorization": "Bearer " + self.settings.ai_api_key})
+                    r.raise_for_status()
+                    content = r.json()["choices"][0]["message"]["content"]
+                    return content[:8000] if isinstance(content, str) else None
+            except httpx.HTTPStatusError as exc:
+                log.warning("model rejected: HTTP %s", exc.response.status_code)
+                if exc.response.status_code not in (429, 500, 502, 503, 504):
+                    return None
+            except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as exc:
+                # Unknown paid-call outcome is not automatically repeated.
+                log.warning("model unavailable: %s", type(exc).__name__)
+                return None
+        return None
 
 
     def describe_screenshot(self, content: bytes) -> str | None:

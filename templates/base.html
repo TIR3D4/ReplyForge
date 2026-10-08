@@ -1,0 +1,23 @@
+{% set fa = locale == 'fa' %}
+<!doctype html><html lang="{{ locale }}" dir="{{ 'rtl' if fa else 'ltr' }}" data-theme="light">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><title>ReplyForge · {{ brand|default('Support workspace') }}</title>
+<link rel="stylesheet" href="/static/admin.css"><script src="/static/admin.js" defer></script></head>
+<body>
+<a class="skip" href="#main">{{ 'رفتن به محتوا' if fa else 'Skip to content' }}</a>
+<aside class="sidebar" aria-label="{{ 'منوی اصلی' if fa else 'Main navigation' }}">
+<a class="wordmark" href="/admin"><span class="logo">r<span>f</span></span><span>ReplyForge<small>{{ 'فضای کار پشتیبانی' if fa else 'SUPPORT WORKSPACE' }}</small></span></a>
+<div class="workspace"><span class="avatar">{{ (brand|default('R'))[:1] }}</span><div>{{ brand|default('ReplyForge') }}<small>Telegram Business</small></div><span class="dot"></span></div>
+<small class="nav-label">{{ 'مدیریت فضای کار' if fa else 'WORKSPACE' }}</small>
+<nav>
+{% for path,icon,en,ir in [('/admin','◫','Overview','نمای کلی'),('/admin/tickets','☷','Support inbox','صندوق پشتیبانی'),('/admin/agent','✧','AI agent','دستیار هوشمند'),('/admin#knowledge','▤','Knowledge base','دانشنامه'),('/admin/playbook','◇','Workflows & brand','گردش‌کار و برند'),('/admin/connections','⇄','Connections','اتصال‌ها'),('/admin/insight','◎','ReplyForge Insight','یادگیری از گفتگوها'),('/admin/system','⚙','System & audit','سیستم و رویدادها')] %}
+<a href="{{ path }}" {% if request.url.path == path %}aria-current="page"{% endif %}><span class="nav-icon" aria-hidden="true">{{ icon }}</span>{{ ir if fa else en }}{% if 'insight' in path %}<span class="tiny">INSIGHT</span>{% endif %}</a>
+{% endfor %}
+</nav>
+<div class="sidebar-foot"><span class="dot"></span> {{ 'میزبانی روی سرور شما' if fa else 'Self-hosted workspace' }}<small>{{ 'داده‌های شما، کنترل شما' if fa else 'Your data. Your control.' }}</small></div>
+</aside>
+<div class="app-shell"><div class="topbar"><div class="breadcrumbs">{{ 'فضای کار' if fa else 'Workspace' }} <span>/</span> <strong>ReplyForge</strong></div><button id="theme-toggle" class="ghost" type="button" aria-label="{{ 'تغییر تم روشن و تیره' if fa else 'Toggle light and dark theme' }}">◐ <span>{{ 'تغییر تم' if fa else 'Appearance' }}</span></button></div>
+<main id="main" tabindex="-1">{% block content %}{% endblock %}</main>
+<footer>ReplyForge <span>·</span> {{ 'پشتیبانی هوشمند، با نظارت شما' if fa else 'Intelligent support. Human control.' }}</footer></div>
+<div id="form-status" role="status" aria-live="polite"></div>
+</body></html>

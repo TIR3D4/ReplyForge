@@ -1,36 +1,10 @@
-<!DOCTYPE html>
-<html lang="{{ locale }}" dir="{{ 'rtl' if locale == 'fa' else 'ltr' }}">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ReplyForge · {{ brand }}</title>
-<style>
-:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#0b1120;color:#e7edff;color-scheme:dark}
-*{box-sizing:border-box}body{margin:0;padding:24px;max-width:1500px;margin-inline:auto;line-height:1.5}
-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:26px}
-h1{font-size:27px;margin:0}h2{font-size:17px;margin:0 0 16px}
-small, .muted{color:#94a3b8}a{color:#9ddaf8}a:hover{color:#fff}
-mark{background:#173b49;color:#8cead4;padding:4px 10px;border-radius:20px}
-.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:20px}
-.card,.panel{background:#141e32;border:1px solid #29364d;border-radius:16px;padding:20px}
-.card strong{display:block;font-size:29px;margin-top:8px}.card small{font-size:12px}
-.layout{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start}
-.panel{margin-bottom:16px;overflow:hidden} .panel:target{border-color:#43868e}
-table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:start;padding:11px 8px;border-bottom:1px solid #29364d;vertical-align:top}th{color:#9daec6;font-weight:500}
-input,textarea,select,button{border:1px solid #37445e;border-radius:10px;padding:11px 12px;background:#0d1526;color:#e7edff;font:inherit}
-input,textarea{width:100%}textarea{min-height:100px;resize:vertical}
-button{background:#166c71;border-color:#258b92;font-weight:600;cursor:pointer}button:hover{background:#1e8186}
-button.ghost{background:transparent}form{display:grid;gap:10px}.badge{padding:4px 7px;border-radius:6px;background:#243249;font-size:12px}
-.row{display:flex;gap:8px;align-items:center;justify-content:space-between}.stack{display:grid;gap:12px}
-.anchor{font-size:12px;text-decoration:none;color:#9bcae5}
-@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.layout{grid-template-columns:1fr}}
-@media(max-width:480px){body{padding:12px}.cards{gap:8px}.card,.panel{padding:13px}h1{font-size:22px}}
-</style>
-</head>
-<body>
+{% extends "base.html" %}
+{% block content %}
+
 <header>
 <nav style="margin-bottom:8px"><a href="/admin/knowledge/review">📚 {{ _('Knowledge review', 'بازبینی دانشنامه') }} ({{ pending_learning }})</a> · <a href="/admin/tickets">🎧 {{ _('Tickets', 'صف تیکت‌ها') }}</a> · <a href="/admin/playbook">⚙ {{ _('Edit workflows', 'ویرایش منو و گردش‌کار') }}</a></nav>
 <div><small>{{ _('REPLYFORGE / OPERATOR CONSOLE', 'REPLYFORGE / داشبورد اپراتور') }}</small><h1>{{ brand }}</h1><small>Telegram Business · self-hosted support</small></div>
-<div><mark>{{ _('● ONLINE', '● آنلاین') }}</mark> <a class="anchor" href="/healthz">{{ _('Health', 'سلامت') }}</a></div>
+<div><mark>{{ _('● WORKER ONLINE', '● پردازشگر آنلاین') if worker_alive else _('○ WORKER OFFLINE', '○ پردازشگر آفلاین') }}</mark> <a class="anchor" href="/healthz">{{ _('Health', 'سلامت') }}</a></div>
 </header>
 <section class="panel" style="border-color:{{ '#168b7e' if auto_reply_enabled else '#b87b32' }}">
 <div class="row" style="gap:20px;flex-wrap:wrap">
@@ -121,4 +95,5 @@ button.ghost{background:transparent}form{display:grid;gap:10px}.badge{padding:4p
 </div>
 </div>
 <footer class="muted" style="padding:25px 0;text-align:center">ReplyForge · Open source · {{ _('Human-first automation', 'اتوماسیون با اولویت انسان') }}</footer>
-</body></html>
+
+{% endblock %}

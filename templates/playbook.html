@@ -1,25 +1,6 @@
-<!DOCTYPE html>
-<html lang="{{ locale }}" dir="{{ 'rtl' if locale == 'fa' else 'ltr' }}">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ReplyForge · Workflows</title>
-<style>
-:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif;background:#0b1120;color:#e7edff}
-*{box-sizing:border-box}body{max-width:1120px;padding:26px;margin:0 auto}
-a{color:#a6dfeb}h1{margin:14px 0 6px}p,small{color:#aebed4;line-height:1.6}
-.panel{background:#151f34;border:1px solid #31415e;padding:22px;border-radius:18px;margin:18px 0}
-textarea{font-family:ui-monospace,monospace;font-size:13px;line-height:1.5;
-border:1px solid #476077;background:#0b1525;color:#e8f1ff;width:100%;border-radius:12px;
-padding:16px;min-height:520px;resize:vertical;direction:ltr;text-align:left}
-input,select{background:#0b1525;color:#e8f1ff;border:1px solid #476077;border-radius:9px;padding:12px;width:100%;max-width:540px}
-.menu-row{display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:10px}
-textarea.small{min-height:90px;height:100px;width:100%;max-width:680px;direction:inherit;text-align:start;font-family:inherit}
-button{background:#12727a;border:0;color:white;border-radius:9px;padding:11px 16px;
-cursor:pointer;font-weight:600}button.secondary{background:#33425d}
-table{width:100%;border-collapse:collapse}td,th{text-align:start;border-bottom:1px solid #2a3953;padding:12px}
-form.inline{display:inline} .pill{border-radius:14px;padding:5px 10px;background:#1c625b}
-@media(max-width:600px){body{padding:12px}.panel{padding:13px}textarea{min-height:450px}}
-</style></head>
-<body>
+{% extends "base.html" %}
+{% block content %}
+
 <a href="/admin">{{ '← داشبورد' if locale == 'fa' else '← Dashboard' }}</a>
 <h1>{{ 'ویرایش هوشمند منو و گردش‌کار' if locale == 'fa' else 'Support workflow editor' }}</h1>
 <p>{{ brand }} · {{ 'نسخه فعال' if locale == 'fa' else 'Active version' }}:
@@ -85,4 +66,5 @@ form.inline{display:inline} .pill{border-radius:14px;padding:5px 10px;background
 </tbody></table>
 </div>
 <p>Documentation: <a href="https://github.com/TIR3D4/ReplyForge/blob/main/docs/WORKFLOWS.md">Support workflow schema</a></p>
-</body></html>
+
+{% endblock %}

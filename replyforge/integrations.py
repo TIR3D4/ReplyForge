@@ -32,7 +32,8 @@ def _expiration(value):
         return None
     try:
         if isinstance(value, str) and not value.isdigit():
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
         # Marzban sends seconds as int, some clients send milliseconds.
         raw = int(value)
         if raw > 100_000_000_000:
@@ -43,6 +44,19 @@ def _expiration(value):
 
 
 def normalize(provider: str, value: dict) -> SubscriptionStatus:
+    # Missing or changed upstream fields must not become fabricated unlimited accounts.
+    if not isinstance(value, dict) or not {'status', 'used_traffic', 'data_limit', 'expire'} <= value.keys():
+        raise ProviderError(provider + "_schema_mismatch")
+    if value['status'] not in ('active', 'disabled', 'limited', 'expired', 'on_hold'):
+        raise ProviderError(provider + "_unknown_status")
+    for key in ('used_traffic', 'data_limit'):
+        item = value[key]
+        if item is None and key == 'data_limit':
+            continue
+        if type(item) is not int or item < 0:
+            raise ProviderError(provider + "_invalid_usage")
+    if value['expire'] not in (None, 0) and _expiration(value['expire']) is None:
+        raise ProviderError(provider + "_invalid_expiration")
     limit = int(value.get("data_limit") or 0)
     return SubscriptionStatus(
         provider=provider,
@@ -64,6 +78,9 @@ class MarzbanAdapter:
         self.transport = transport
 
     def lookup(self, user_ref: str) -> SubscriptionStatus:
+        import re
+        if not re.fullmatch(r"[A-Za-z0-9_]{1,255}", user_ref):
+            raise ProviderError("marzban_invalid_user_ref")
         if not self.s.marzban_base_url or not self.s.marzban_username or not self.s.marzban_password:
             raise ProviderError("marzban_not_configured")
         try:

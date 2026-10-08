@@ -1,0 +1,4 @@
+{% extends 'base.html' %}{% block content %}
+<div class="page-head"><div><span class="eyebrow">OPERATIONS</span><h1>{{ 'سیستم و رویدادهای مدیریتی' if fa else 'System & audit trail' }}</h1><p>{{ '۱۰۰ رویداد آخر؛ بدون نمایش اعتبارنامه‌های سرویس' if fa else 'Latest 100 audit events; service credentials are never displayed' }}</p></div><a class="button" href="/readyz">{{ 'بررسی آمادگی پردازشگر' if fa else 'Check worker readiness' }}</a></div>
+<section class="panel"><table><thead><tr><th>#</th><th>{{ 'عامل' if fa else 'Actor' }}</th><th>{{ 'رویداد' if fa else 'Action' }}</th><th>{{ 'زمان' if fa else 'Time' }}</th></tr></thead><tbody>{% for e in events %}<tr><td>{{ e.id }}</td><td>{{ e.actor }}</td><td><code>{{ e.action }}</code></td><td>{{ e.created_at }}</td></tr>{% else %}<tr><td colspan="4" class="empty">{{ 'رویدادی ثبت نشده است.' if fa else 'No audit events yet.' }}</td></tr>{% endfor %}</tbody></table></section>
+{% endblock %}

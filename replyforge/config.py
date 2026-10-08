@@ -48,6 +48,8 @@ class Settings:
     pasarguard_base_url: str
     pasarguard_api_key: str
     allow_http_panels: bool
+    ai_fallback_model: str = ""
+    ai_max_output_tokens: int = 250
 
     @classmethod
     def from_env(cls, *, strict: bool = True) -> "Settings":
@@ -79,6 +81,8 @@ class Settings:
             ai_api_key=g("AI_API_KEY"),
             ai_base_url=g("AI_BASE_URL", "https://api.openai.com/v1"),
             ai_model=g("AI_MODEL", "gpt-4.1-mini"),
+            ai_fallback_model=g("AI_FALLBACK_MODEL"),
+            ai_max_output_tokens=int(g("AI_MAX_OUTPUT_TOKENS", "250")),
             marzban_base_url=g("MARZBAN_BASE_URL"),
             marzban_username=g("MARZBAN_USERNAME"),
             marzban_password=g("MARZBAN_PASSWORD"),
@@ -100,6 +104,8 @@ class Settings:
             if min(len(obj.webhook_secret), len(obj.admin_password),
                    len(obj.binding_pepper), len(obj.internal_api_key)) < 16:
                 raise ConfigError("Secrets must be at least 16 characters")
+        if not 32 <= obj.ai_max_output_tokens <= 2000:
+            raise ConfigError("AI_MAX_OUTPUT_TOKENS must be 32–2000")
         if obj.support_alert_chat_id == 0:
             raise ConfigError("SUPPORT_ALERT_CHAT_ID must be a non-zero Telegram chat ID")
         if not 65536 <= obj.media_max_bytes <= 10485760:

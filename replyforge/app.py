@@ -15,6 +15,7 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import case, delete, desc, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
@@ -71,6 +72,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
     )
 
     app.add_middleware(RequestBoundary)
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
     def secret_token(request: Request):
         return request.app.state.settings.binding_pepper
@@ -530,7 +532,8 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             locale = effective_playbook(
                 session, request.app.state.playbook,
             )[0].get("locale", "en")
-            settings = request.app.state.settings
+            from .ai_policy import effective_settings
+            settings = effective_settings(session, request.app.state.settings)
 
             def allow_call():
                 if not settings.ai_api_key:
@@ -877,6 +880,8 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                               action="ticket_closed", detail=str(ticket.id)))
         return RedirectResponse("/admin/tickets", status_code=303)
 
+    from .admin_modules import register_admin_modules
+    register_admin_modules(app, authenticate, csrf, csrf_value, templates)
     return app
 
 

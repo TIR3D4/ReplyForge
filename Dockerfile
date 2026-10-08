@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir .
 COPY config ./config
 COPY examples ./examples
 COPY templates ./templates
+COPY static ./static
 COPY alembic.ini ./alembic.ini
 COPY migrations ./migrations
 RUN useradd -r -u 10001 replyforge

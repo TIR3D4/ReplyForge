@@ -1,20 +1,6 @@
-<!DOCTYPE html><html lang="{{ locale }}" dir="{{ 'rtl' if locale == 'fa' else 'ltr' }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ReplyForge · Conversation {{ conv.id }}</title>
-<style>
-:root{font-family:system-ui,sans-serif;background:#0b1120;color:#e8efff;color-scheme:dark}
-body{max-width:800px;margin:0 auto;padding:24px}a{color:#9ddaf8}
-.card{border-radius:14px;border:1px solid #2c3950;background:#152038;padding:18px;margin:16px 0}
-.messages{display:flex;flex-direction:column;gap:12px}
-.msg{background:#1e2c43;padding:14px;border-radius:14px;max-width:85%;white-space:pre-wrap;overflow-wrap:anywhere}
-.out{margin-left:auto;background:#17434b}.meta{display:block;font-size:12px;color:#a9b9ce;margin-bottom:6px}
-button{border:0;border-radius:10px;background:#176c72;color:white;padding:12px 16px;font-weight:600;cursor:pointer}
-button.secondary{background:#38455d}form{display:inline}
-.ticket-form{display:grid;gap:10px;margin-top:12px}
-.ticket-form input,.ticket-form textarea,.ticket-form select{background:#0b1525;color:#fff;width:100%;border:1px solid #43536d;border-radius:8px;padding:10px}
-.note{background:#1c3450;border-radius:9px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+{% extends "base.html" %}
+{% block content %}
 
-</style></head>
-<body>
 <a href="/admin">{{ _('← Dashboard', '← داشبورد') }}</a> · <a href="/admin/tickets">🎧 {{ _('Tickets', 'تیکت‌ها') }}</a><h1>{{ _('Conversation #', 'گفتگو #') }}{{ conv.id }}</h1>
 <div class="card"><strong>{{ _('Telegram chat:', 'شناسه تلگرام:') }}</strong> {{ conv.chat_id }} <a href="tg://user?id={{ conv.chat_id }}">{{ _('Open in Telegram', 'بازکردن در تلگرام') }}</a> · <strong>{{ _('Owner:', 'مسئول:') }}</strong> {{ conv.owner }}
 <p><strong>{{ _('Workflow:', 'فرایند:') }}</strong> {{ conv.workflow or 'None' }} · <strong>{{ _('Step:', 'مرحله:') }}</strong> {{ conv.step or 'None' }}</p>
@@ -84,7 +70,7 @@ button.secondary{background:#38455d}form{display:inline}
 <form method="post" action="/admin/conversations/{{ conv.id }}/reply" style="display:grid;gap:12px">
 <input type="hidden" name="csrf_token" value="{{ csrf }}">
 {% if draft %}<input type="hidden" name="draft_id" value="{{ draft.id }}">{% endif %}
-<textarea name="message" maxlength="3500" rows="4" required placeholder="{{ _('Write your message…', 'پیام را بنویسید…') }}" style="width:100%;padding:12px;border-radius:10px;background:#0b1525;color:white;border:1px solid #38455d;resize:vertical">{{ draft.text if draft else '' }}</textarea>
+<textarea name="message" maxlength="3500" rows="4" required placeholder="{{ _('Write your message…', 'پیام را بنویسید…') }}">{{ draft.text if draft else '' }}</textarea>
 <div><button type="submit">{{ _('Send from Business account', 'ارسال از اکانت پشتیبانی') }}</button></div>
 </form>
 {% if outbound %}
@@ -96,7 +82,7 @@ button.secondary{background:#38455d}form{display:inline}
 <h2>🗑️ {{ _('Erase local customer data', 'حذف اطلاعات مشتری از ReplyForge') }}</h2>
 <p>{{ _('This permanently deletes local chat history, notes, drafts, tickets and local associations. It does not delete Telegram chats, VPN panel users or backups.', 'این عملیات تاریخچه، تیکت‌ها، یادداشت‌ها، پیش‌نویس‌ها و ارتباطات داخلی مشتری را برای همیشه از پایگاه داده حذف می‌کند. پیام‌های تلگرام، پنل VPN و نسخه‌های پشتیبان حذف نمی‌شوند.') }}</p>
 <form class="ticket-form" method="post" action="/admin/conversations/{{ conv.id }}/erase"
-onsubmit="return confirm('Permanently erase the local customer record?');">
+>
 <input type="hidden" name="csrf_token" value="{{ csrf }}">
 <label>{{ _('Type exactly:', 'دقیقاً عبارت زیر را وارد کنید:') }} <code>ERASE {{ conv.chat_id }}</code>
 <input name="confirmation" autocomplete="off" maxlength="40" placeholder="ERASE {{ conv.chat_id }}" required></label>
@@ -114,4 +100,5 @@ onsubmit="return confirm('Permanently erase the local customer record?');">
 {% endif %}
 </div>
 {% else %}<div class="card">{{ _('No messages yet.', 'هنوز پیامی ثبت نشده.') }}</div>{% endfor %}</div>
-</body></html>
+
+{% endblock %}
