@@ -23,7 +23,7 @@ from .database import session_factory, session_scope
 from .models import (
     Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, Message, Outbox, Ticket, utcnow
 )
-from .security import constant_time_equal, fingerprint
+from .security import constant_time_equal, fingerprint, subscription_token_fingerprint
 from .playbooks import active_version, activate_version, effective_playbook, save_playbook
 from .models import PlaybookVersion
 from .telegram import TelegramClient
@@ -134,15 +134,18 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         if data.provider == "pasarguard" and not data.user_ref.isdecimal():
             raise HTTPException(status_code=422, detail="Pasarguard requires numeric user ID")
         digest = fingerprint(data.link, request.app.state.settings.binding_pepper)
+        token_hmac = subscription_token_fingerprint(
+            data.link, request.app.state.settings.binding_pepper)
         with session_scope(request.app.state.factory) as session:
             existing = session.scalar(select(Binding).where(Binding.link_hmac == digest))
             if existing is None:
-                existing = Binding(link_hmac=digest, provider=data.provider,
+                existing = Binding(link_hmac=digest, token_hmac=token_hmac, provider=data.provider,
                                    user_ref=data.user_ref, label=data.label,
                                    customer_chat_id=data.customer_chat_id)
                 session.add(existing)
             else:
                 existing.provider, existing.user_ref = data.provider, data.user_ref
+                existing.token_hmac = token_hmac
                 existing.label, existing.customer_chat_id = data.label, data.customer_chat_id
             session.flush()
             return {"id": existing.id, "provider": existing.provider, "saved": True}
@@ -367,11 +370,13 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         if provider == "pasarguard" and not user_ref.isdecimal():
             raise HTTPException(422)
         digest = fingerprint(link, request.app.state.settings.binding_pepper)
+        token_hmac = subscription_token_fingerprint(
+            link, request.app.state.settings.binding_pepper)
         with session_scope(request.app.state.factory) as session:
             entry = session.scalar(select(Binding).where(Binding.link_hmac == digest))
             if entry is None:
-                session.add(Binding(link_hmac=digest, provider=provider, user_ref=user_ref,
-                                    label=label[:255]))
+                session.add(Binding(link_hmac=digest, token_hmac=token_hmac, provider=provider,
+                                    user_ref=user_ref, label=label[:255]))
         return RedirectResponse("/admin#bindings", status_code=303)
 
     @app.post("/admin/tickets/{ticket_id}/close")
