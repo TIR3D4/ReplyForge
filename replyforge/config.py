@@ -144,6 +144,15 @@ def validate_playbook(config: Any) -> dict[str, Any]:
         raise ConfigError("Playbook must be a mapping")
     if not isinstance(config.get("brand"), str) or not config["brand"]:
         raise ConfigError("Playbook requires brand")
+    sla = config.get("support_sla_minutes", 60)
+    if type(sla) is not int or not 5 <= sla <= 1440:
+        raise ConfigError("support_sla_minutes must be between 5 and 1440")
+    priorities = config.get("support_priorities", {})
+    if not isinstance(priorities, dict) or any(
+        not isinstance(k, str) or v not in ("low", "normal", "high", "urgent")
+        for k, v in priorities.items()
+    ):
+        raise ConfigError("support_priorities must map categories to valid priorities")
     menu = config.get("menu")
     workflows = config.get("workflows")
     if not isinstance(menu, list) or not isinstance(workflows, dict):

@@ -1,4 +1,8 @@
 brand: ReplyForge Support
+support_sla_minutes: 60
+support_priorities:
+  payment: high
+  delivery: normal
 locale: en
 welcome: "Hi! 👋 I'm your support assistant. Choose a topic or describe your question."
 handoff_text: "Your request is in the human support queue. A team member will review it."

@@ -14,7 +14,7 @@ ReplyForge is a **self-hosted, open-source Telegram Business support system** th
 - Configurable YAML menus and **multi-step workflows**: ask for a choice, reference, image, question, subscription link; close or hand off.
 - Optional AI intent/choice recognition, semantic selection among approved FAQs, opt-in screenshot reading and opt-in voice transcription with strict file-size and daily model budgets. Rule-driven workflows continue when the model is unavailable.
 - A conservative, approved-only FAQ knowledge base. The model never makes up payment status or account balances.
-- Default **monitor-only** onboarding (AI replies disabled until an administrator opts in), emergency pause, human handoff, a real operator reply composer, inbound evidence notifications and customer-confirmed resolution tracking.
+- SLA-driven ticket priority, assignment, private notes, triage and audited escalation. Default **monitor-only** onboarding (AI replies disabled until an administrator opts in), emergency pause, human handoff, a real operator reply composer, inbound evidence notifications and customer-confirmed resolution tracking.
 - Marzban and Pasarguard **read-only account status**, optional catalog sync and HMAC token matching across trusted panel/relay domain variants. The AzadBird preset handles Persian VPN and payment triage.
 - Internal link-provisioning API for a store/billing integration. No arbitrary customer URL is fetched.
 - English default preset, Persian VPN preset, responsive dashboard and tests.
