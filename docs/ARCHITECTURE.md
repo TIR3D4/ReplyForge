@@ -1,4 +1,4 @@
-# Architecture Decision Record — V1
+# Architecture Decision Record — V1.1
 
 ## Execution topology
 
@@ -50,7 +50,7 @@ The model selects only predefined menu actions or options. It cannot execute SQL
 - No retroactive customer history before bot connection.
 - No multi-worker horizontal processing guarantee.
 - No per-account business settings within one deployment.
-- No semantic vector embeddings or image OCR in V1; approved FAQ lookup uses lexical search plus optional model selection from a bounded list. Images are collected for manual review.
+- No vector embedding index or autonomous financial image validation. Optional vision extracts bounded technical clues from troubleshooting screenshots; financial evidence remains in the human-review path.
 - Database schema is initialized by Alembic migration 0001 on first boot. All future schema changes require reviewed forward migrations, backups and a staging rehearsal.
 
 
@@ -69,3 +69,12 @@ The LLM remains a bounded classifier and approved-FAQ selector; it is **not** gi
 ## Support operations (V1.1)
 
 Every escalation creates a ticket with a configurable first-response SLA (default 60 minutes), priority, category and optional assignment. A single worker escalates unanswered tickets once, records an audit event and can notify the operator chat. Internal notes are never delivered to customers. Ticket closure does not automatically reactivate AI; an operator must explicitly resume it.
+
+
+## V1.1 operational safeguards
+
+Human messages are intentional sends: multiple queued operator messages preserve FIFO order, and an earlier ambiguous send blocks following sends until explicit reconciliation. A ticket's first-response SLA is satisfied **only after confirmed Telegram delivery** or an observed manual owner reply, not on enqueue. SLA sweeps run periodically even during a busy inbox.
+
+The inbox can combine adjacent short text-only messages from the same customer into a single model interaction, while retaining each constituent message for auditing. Media, owner-authored messages, and intervening other chat events break the batch. A single worker is still required until per-chat distributed fencing is implemented and tested.
+
+Human operators can generate review-only suggested replies. No automatic Telegram send occurs. Resolved tickets may produce unpublished FAQ candidates: separate operator approval is required before they can answer customer requests. The application supports bounded retention scrubbing and an authenticated, explicitly confirmed local erasure operation, but not removal of outside Telegram history or old backups.

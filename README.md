@@ -6,9 +6,12 @@ ReplyForge is a **self-hosted, open-source Telegram Business support system** th
 
 [Setup](#quick-start) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Playbooks](docs/WORKFLOWS.md) · [API](docs/API.md) · [Persian guide](docs/README-fa.md) · [Live acceptance tests](docs/SMOKE_TEST.md)
 
-## V1 support hardening — release candidate
+## ReplyForge V1.1 — professional support release candidate
 
 - Official Telegram Business connection, including Business permission updates, callbacks, manual-owner takeover, edited/deleted message handling.
+- **V1.1 professional ticketing:** searchable priority queue, assignment, private notes, initial-response SLA, audited escalation, closing/reopening and status history.
+- **V1.1 human-in-the-loop AI:** model-assisted *draft suggestions* for operators only, with edit-before-send approval, and explicitly reviewed knowledge candidates based on resolved tickets.
+- **V1.1 privacy:** configurable 180-day data-content scrubbing, including ticket summaries, and explicit administrator-confirmed local customer data erasure. No automatic deletion of external Telegram or upstream panel records.
 - Compact one/two-column inline menu with editing instead of spamming new messages. Consecutive inbound texts can be batched using MESSAGE_DEBOUNCE_MS to avoid multiple AI calls. Stale callbacks are rejected, and handoff edits clear old buttons.
 - Durable PostgreSQL inbox/outbox, idempotent incoming update IDs, safe unknown-delivery handling, and event retry limits.
 - Configurable YAML menus and **multi-step workflows**: ask for a choice, reference, image, question, subscription link; close or hand off.
@@ -25,7 +28,7 @@ V1 is **not** an autonomous payment verifier. A receipt image is collected as ev
 
 ## Production activation criteria
 
-**V1.0.0rc1 is a release candidate, not a claim of production certification.** New deployments default to monitor-only. Before enabling AI for real customers, complete the staged checklist in [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md), using the *actual* Telegram Business connection and installed Marzban/Pasarguard versions. CI cannot replace this live acceptance test.
+**V1.1.0rc1 is a release candidate, not a claim of production certification.** New deployments default to monitor-only. Before enabling AI for real customers, complete the staged checklist in [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md), using the *actual* Telegram Business connection and installed Marzban/Pasarguard versions. CI cannot replace this live acceptance test.
 
 ## Quick start
 
