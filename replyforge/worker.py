@@ -218,6 +218,19 @@ class Processor:
             return
         sender_id = (message.get("from") or {}).get("id")
         if conn.owner_user_id is not None and sender_id == conn.owner_user_id:
+            # Capture human operator teaching examples without treating them as
+            # customer inbound messages or reopening the reply window.
+            msg_id = message.get("message_id")
+            if msg_id is not None and session.scalar(select(Message.id).where(
+                Message.conversation_id == conv.id,
+                Message.telegram_message_id == msg_id,
+                Message.direction == "out",
+            )) is None:
+                session.add(Message(
+                    conversation_id=conv.id, telegram_message_id=msg_id,
+                    direction="out", kind="human",
+                    content=redact(message.get("text") or message.get("caption") or ""),
+                ))
             conv.owner = "human"
             conv.revision += 1
             session.add(Audit(conversation_id=conv.id, actor="owner", action="takeover"))
@@ -225,6 +238,8 @@ class Processor:
         if not record_inbound(session, conv, message):
             return
         if conv.owner != "ai" or not conn.can_reply or not auto_reply_enabled(session, self.settings):
+            if conv.owner in ("human", "human_pending"):
+                self._queue_human_followup(session, conv, message)
             return
         photo = message.get("photo") or []
         document = message.get("document") or {}
@@ -283,6 +298,39 @@ class Processor:
         conv.state = {**(conv.state or {}), "_playbook_version": version}
         save_proposal(session, conv, proposal)
         self._queue_operator_alert(session, conv)
+
+    def _queue_human_followup(self, session: Session, conv: Conversation, message: dict) -> None:
+        """Notify an already-assigned human if new evidence arrived."""
+        if not self.settings.support_alert_chat_id:
+            return
+        photo = message.get("photo") or []
+        doc = message.get("document") or {}
+        file_id = (photo[-1].get("file_id") if photo else
+                   (doc.get("file_id") if str(doc.get("mime_type", "")).startswith("image/")
+                    else None))
+        if file_id:
+            session.add(Outbox(
+                conversation_id=conv.id, revision=conv.revision,
+                kind="alert_photo", text="📎 New evidence in support chat " + str(conv.chat_id),
+                buttons=[{"file_id": file_id}],
+            ))
+        info = dict(conv.state or {})
+        previous = info.get("human_update_alert_at")
+        try:
+            last_time = datetime.fromisoformat(previous) if previous else None
+        except (ValueError, TypeError):
+            last_time = None
+        if last_time is not None and last_time.tzinfo is None:
+            last_time = last_time.replace(tzinfo=timezone.utc)
+        if last_time is None or (utcnow() - last_time) >= timedelta(seconds=90):
+            session.add(Outbox(
+                conversation_id=conv.id, revision=conv.revision,
+                kind="alert", text="💬 Customer " + str(conv.chat_id) +
+                " added a message to a human-owned support conversation.",
+                buttons=[],
+            ))
+            info["human_update_alert_at"] = utcnow().isoformat()
+            conv.state = info
 
     def _queue_operator_alert(self, session: Session, conv: Conversation) -> None:
         if not self.settings.support_alert_chat_id or conv.owner != "human_pending":
