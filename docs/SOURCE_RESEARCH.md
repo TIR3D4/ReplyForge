@@ -87,6 +87,7 @@ Scope: focused implementation and test inspection, not whole-project certificati
 - Decision: Numeric by-id lookup, users.read permission, X-Api-Key authentication. Fail closed on schema changes; API compatibility is not inferred from product name.
 
 ## taskiq-python/taskiq
+- Adoption observed via GitHub API on 2026-10-08: 2,352 stars; not archived; pushed 2026-10-08T11:35:52Z.
 - Inspected commit: [`f08a54ab3a8e4e16045c84379cf26eb4fa83d4b2`](https://github.com/taskiq-python/taskiq/commit/f08a54ab3a8e4e16045c84379cf26eb4fa83d4b2); commit date 2026-10-08.
 - Implementation: [taskiq/middlewares/simple_retry_middleware.py](https://github.com/taskiq-python/taskiq/blob/f08a54ab3a8e4e16045c84379cf26eb4fa83d4b2/taskiq/middlewares/simple_retry_middleware.py)
 - Tests inspected: [tests/middlewares/test_simple_retry.py](https://github.com/taskiq-python/taskiq/blob/f08a54ab3a8e4e16045c84379cf26eb4fa83d4b2/tests/middlewares/test_simple_retry.py)

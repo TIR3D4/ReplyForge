@@ -299,6 +299,7 @@ def build_markup(conversation: Conversation, actions: list[tuple[str, str]]):
     nonce = secrets.token_hex(4)
     data = dict(conversation.state or {})
     data["menu_nonce"] = nonce
+    data["menu_issued_at"] = datetime.now(timezone.utc).timestamp()
     data["menu_actions"] = [action for _, action in actions]
     conversation.state = data
     buttons = [
@@ -320,6 +321,9 @@ def callback_action(conv: Conversation, payload: str) -> str | None:
     if len(pieces) != 3 or pieces[0] != "rf":
         return None
     state = conv.state or {}
+    issued = state.get("menu_issued_at")
+    if not isinstance(issued, (int, float)) or not 0 <= datetime.now(timezone.utc).timestamp() - issued <= 1800:
+        return None
     if pieces[1] != state.get("menu_nonce"):
         return None
     try:

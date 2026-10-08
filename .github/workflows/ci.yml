@@ -63,6 +63,12 @@ jobs:
             -e INTERNAL_API_KEY="01234567890123456789012345678900" \
             -e DATABASE_URL="sqlite+pysqlite:////tmp/replyforge-ci.db" \
             replyforge-ci replyforge init
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install PyYAML
+      - name: Disposable deployment, restart, backup and restore
+        run: python scripts/deployment_smoke.py
 
   browser:
     runs-on: ubuntu-latest
@@ -72,13 +78,29 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]" playwright==1.63.0
-      - run: python -m playwright install --with-deps chromium
+      - run: google-chrome --version
       - name: Desktop and mobile, Persian and English
         env:
           RUN_BROWSER_TESTS: "1"
+          BROWSER_CHANNEL: chrome
         run: python -m pytest -q tests/test_browser.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: interface-screenshots
           path: artifacts/ui
+
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit
+      - run: pip-audit -r requirements.lock --no-deps --disable-pip --format json --output dependency-audit.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-audit
+          path: dependency-audit.json

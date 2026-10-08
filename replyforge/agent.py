@@ -19,7 +19,7 @@ def _keywords(text: str) -> set[str]:
 
 def local_intent(text: str, allowed: set[str]) -> str | None:
     """Reliable high-precision rules; nonmatches leave control to menus."""
-    lower = text.casefold()
+    lower = text.casefold().replace("ي", "ی").replace("ك", "ک")
     rules = {
         "connection": ("وصل نم", "کانکت نم", "سرور قرمز", "connection", "not connect", "قطع شده", "وصل نمیشه"),
         "subscription": ("اشتراک", "حجم", "انقضا", "subscription", "remaining", "expiry"),
@@ -28,7 +28,7 @@ def local_intent(text: str, allowed: set[str]) -> str | None:
         "question": ("سؤال", "سوال", "question", "faq"),
     }
     for key, hints in rules.items():
-        if key in allowed and any(h in lower for h in hints):
+        if key in allowed and any((bool(re.search(r"(?<!\w)رسید(?!\w)", lower)) if h == "رسید" else h in lower) for h in hints):
             return "flow:" + key
     return None
 
@@ -228,11 +228,13 @@ class AIEngine:
                     possible.append(str(op["value"]))
             if len(set(possible)) == 1:
                 return possible[0]
-        if len(options) == 2:
+        # Never infer yes/no from list position (e.g. device or payment-time choices).
+        by_value = {str(op["value"]).casefold(): str(op["value"]) for op in options}
+        if set(by_value) == {"yes", "no"}:
             if any(x in source for x in ("نشد", "not work", "still", "failed", "nope")):
-                return str(options[-1]["value"])
-            if any(x in source for x in ("شد", "worked", "fixed", "انجام شد")):
-                return str(options[0]["value"])
+                return by_value["no"]
+            if any(x in source for x in ("درست شد", "وصل شد", "worked", "fixed", "انجام شد")):
+                return by_value["yes"]
         if not self.settings.ai_api_key:
             return None
         values = [str(op["value"]) for op in options]

@@ -53,10 +53,15 @@ def main():
             # We do not interpolate untrusted values into shell commands.
             if any(ch in replacements[key] for ch in ("\n", "\r", "#")):
                 raise SystemExit("Forbidden character in input; .env not written.")
-            line = key + "=" + replacements[key]
+            # Compose single-quoted values do not expand $VARIABLE references.
+            # Disallow quotes rather than silently changing the credential.
+            if "'" in replacements[key] or "\\" in replacements[key]:
+                raise SystemExit("Single quotes and backslashes are unsupported; .env not written.")
+            line = key + "='" + replacements[key] + "'"
         lines.append(line)
     os.umask(0o077)
-    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with env_file.open("x", encoding="utf-8") as output:
+        output.write("\n".join(lines) + "\n")
     print("Created .env (mode 0600). Keep it private.")
     print("Next: docker compose up -d --build")
     print("Then: docker compose exec api replyforge set-webhook")

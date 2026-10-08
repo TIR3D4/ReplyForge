@@ -77,3 +77,17 @@ def test_no_code_menu_customization(database, test_settings, fake_telegram):
             assert len(config["menu"]) == 2
         body["menu_action"] = ["human", "flow:not_defined", "human"]
         assert client.post("/admin/playbook/basic", auth=auth, data=body).status_code == 422
+
+
+def test_guided_step_editor_validates_transition(database, test_settings, fake_telegram):
+    import re
+    from fastapi.testclient import TestClient
+    from replyforge.app import build_app
+    auth = (test_settings.admin_username, test_settings.admin_password)
+    with TestClient(build_app(test_settings, factory=database, telegram=fake_telegram)) as client:
+        page = client.get('/admin/playbook', auth=auth)
+        token = re.search(r'name="csrf_token" value="([^"]+)', page.text)[1]
+        data = {'csrf_token': token, 'flow': 'connection', 'step': 'app', 'prompt': 'Your question?', 'next_step': 'does-not-exist'}
+        assert client.post('/admin/playbook/step', auth=auth, data=data).status_code == 422
+        data['next_step'] = 'refresh'
+        assert client.post('/admin/playbook/step', auth=auth, data=data).status_code == 200

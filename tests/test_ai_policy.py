@@ -56,3 +56,9 @@ def test_runtime_policy_and_playground_without_external_key(database, test_setti
         assert res.status_code == 200
         assert 'flow:payment' in res.text
         assert not fake_telegram.sent
+
+
+def test_binary_choices_are_not_guessed_from_position(test_settings):
+    ai = AIEngine(test_settings)
+    assert ai.select_choice('fixed', [{'value': 'ios', 'label': 'iPhone'}, {'value': 'android', 'label': 'Android'}]) is None
+    assert ai.select_choice('still not working', [{'value': 'no', 'label': 'No'}, {'value': 'yes', 'label': 'Yes'}]) == 'no'

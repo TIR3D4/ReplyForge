@@ -5,13 +5,13 @@ from datetime import datetime, timedelta, timezone
 import logging
 import time
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .agent import AIEngine
 from .ai_policy import effective_settings
 from .config import Settings, load_playbook
-from .database import claim, session_scope
+from .database import claim, session_scope, exclusive_worker
 from .models import (
     Audit, BusinessConnection, Conversation, Control, Event, Message, Outbox, Ticket, utcnow
 )
@@ -663,11 +663,18 @@ class Processor:
                 row.updated_at = utcnow()
 
     def run(self):
+        with exclusive_worker(self.factory.kw["bind"]) as guard:
+            self._run_loop(guard)
+
+    def _run_loop(self, guard=None):
         log.info("ReplyForge worker started")
         next_heartbeat = 0.0
         next_privacy_sweep = 0.0
         next_sla_sweep = 0.0
         while True:
+            if guard is not None:
+                guard.execute(text("SELECT 1"))
+                guard.commit()
             now = time.monotonic()
             if now >= next_sla_sweep:
                 try:

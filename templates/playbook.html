@@ -43,6 +43,14 @@
 <p><button>{{ 'ذخیره و فعال‌سازی' if locale == 'fa' else 'Save and activate' }}</button></p>
 </form></div>
 <div class="panel">
+<h2>{{ 'ویرایش مرحله‌به‌مرحله' if locale == 'fa' else 'Guided step editor' }}</h2>
+<p>{{ 'متن مرحله‌ها و مسیر بعدی را انتخاب کنید. هر تغییر نسخه جدید می‌سازد.' if locale == 'fa' else 'Edit prompts and transitions. Each save creates a validated version.' }}</p>
+{% for flow_name, flow in config.workflows.items() %}<details><summary>{{ flow.title|default(flow_name) }}</summary>
+{% for step_name, step in flow.states.items() %}{% if not step.get('type') %}
+<form class="panel" method="post" action="/admin/playbook/step"><input type="hidden" name="csrf_token" value="{{ csrf }}"><input type="hidden" name="flow" value="{{ flow_name }}"><input type="hidden" name="step" value="{{ step_name }}"><strong>{{ step_name }} · {{ step.input }}</strong><label>{{ 'متن راهنما' if locale == 'fa' else 'Prompt' }}<textarea name="prompt" maxlength="4000" required>{{ step.prompt }}</textarea></label>
+{% if step.input != 'choice' %}<label>{{ 'مرحله بعد' if locale == 'fa' else 'Next step' }}<select name="next_step">{% for target in flow.states %}<option value="{{ target }}" {% if step.next == target %}selected{% endif %}>{{ target }}</option>{% endfor %}</select></label>{% else %}<p>{% for option in step.options %}<span class="badge">{{ option.label }} → {{ option.next|default(step.next) }}</span> {% endfor %}</p>{% endif %}<button type="submit">{{ 'ذخیره مرحله' if locale == 'fa' else 'Save step' }}</button></form>
+{% endif %}{% endfor %}</details>{% endfor %}
+</div><div class="panel">
 <h2>{{ 'پیکربندی YAML' if locale == 'fa' else 'YAML configuration' }}</h2>
 <p>{{ 'قبل از ذخیره اعتبارسنجی می‌شود؛ اگر نسخه فعلی تغییر کند، فرایندهای ناتمام برای جلوگیری از ناسازگاری به منوی اصلی برمی‌گردند.' if locale == 'fa' else 'Validated before saving. Existing workflows from a changed version return to the home menu.' }}</p>
 <form method="post" action="/admin/playbook">

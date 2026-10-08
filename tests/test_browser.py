@@ -27,7 +27,7 @@ def test_responsive_admin_and_policy_submission(database, test_settings, fake_te
     folder.mkdir(parents=True, exist_ok=True)
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch()
+            browser = pw.chromium.launch(channel=os.getenv("BROWSER_CHANNEL") or None)
             context = browser.new_context(http_credentials={'username': settings.admin_username, 'password': settings.admin_password})
             page = context.new_page()
             errors = []
@@ -39,8 +39,8 @@ def test_responsive_admin_and_policy_submission(database, test_settings, fake_te
                     assert response.status == 200
                     assert page.locator('html').get_attribute('dir') == ('rtl' if locale == 'fa' else 'ltr')
                     assert page.locator('h1').count() == 1
-                    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), f'{path} overflows at {width}'
                     page.screenshot(path=str(folder/f'{locale}-{width}-{path.split("/")[-1]}.png'), full_page=True)
+                    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), f'{path} overflows at {width}'
                 page.goto(f'http://127.0.0.1:{port}/admin/agent')
                 current = page.locator('html').get_attribute('data-theme')
                 page.locator('#theme-toggle').click()

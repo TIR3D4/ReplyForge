@@ -80,3 +80,13 @@ def test_chunked_request_limit_before_json_parsing(database, test_settings, fake
         result = client.post('/telegram/webhook', content=iter([b'x' * 150000, b'x' * 150000]), headers={
             'content-type': 'application/json', 'X-Telegram-Bot-Api-Secret-Token': test_settings.webhook_secret})
         assert result.status_code == 413
+
+
+def test_menu_nonce_expires():
+    from replyforge.workflow import build_markup, callback_action
+    conv = Conversation(state={})
+    markup = build_markup(conv, [('Menu', 'home')])
+    callback = markup['inline_keyboard'][0][0]['callback_data']
+    assert callback_action(conv, callback) == 'home'
+    conv.state = {**conv.state, 'menu_issued_at': (utcnow() - timedelta(hours=1)).timestamp()}
+    assert callback_action(conv, callback) is None

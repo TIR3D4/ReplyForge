@@ -24,6 +24,33 @@ def register_admin_modules(app, authenticate, csrf, csrf_value, templates):
         return {'locale': playbook.get('locale', 'en'), 'brand': playbook['brand'],
                 'csrf': csrf_value(request)}
 
+    @app.post('/admin/playbook/step')
+    def edit_workflow_step(request: Request, flow: str = Form(...), step: str = Form(...),
+                           prompt: str = Form(''), next_step: str = Form(''),
+                           csrf_token: str = Form(...), _=Depends(authenticate)):
+        from copy import deepcopy
+        import yaml
+        from .config import ConfigError
+        from .playbooks import save_playbook
+        csrf(request, csrf_token)
+        with session_scope(request.app.state.factory) as session:
+            current, _ = effective_playbook(session, request.app.state.playbook)
+            changed = deepcopy(current)
+            state = changed.get('workflows', {}).get(flow, {}).get('states', {}).get(step)
+            if state is None or state.get('type') is not None:
+                raise HTTPException(422, detail='Select an existing input state')
+            if not prompt.strip() or len(prompt) > 4000:
+                raise HTTPException(422, detail='Enter a prompt of 1–4000 characters')
+            state['prompt'] = prompt.strip()
+            if state.get('input') != 'choice':
+                state['next'] = next_step
+            try:
+                version = save_playbook(session, yaml.safe_dump(changed, allow_unicode=True, sort_keys=False))
+            except (ConfigError, ValueError) as exc:
+                raise HTTPException(422, detail=str(exc)) from exc
+            session.add(Audit(actor='admin', action='workflow_step_edited', detail=str(version.id)))
+        return RedirectResponse('/admin/playbook', 303)
+
     @app.get('/admin/operators')
     def operators(request: Request, _=Depends(authenticate)):
         with session_scope(request.app.state.factory) as session:

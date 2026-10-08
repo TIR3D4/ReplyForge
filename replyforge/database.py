@@ -66,3 +66,27 @@ def claim(session: Session, model, lease_seconds: int):
 def session_factory(url: str):
     engine = new_engine(url)
     return engine, sessionmaker(bind=engine, expire_on_commit=False)
+
+
+@contextmanager
+def exclusive_worker(engine):
+    """Enforce the supported single-worker topology on PostgreSQL.
+
+    Keep the same session-level advisory lock connection alive throughout run().
+    Losing this connection must stop the worker, not silently reconnect it.
+    """
+    from sqlalchemy import text
+    if engine.dialect.name != 'postgresql':
+        yield None  # SQLite is a single-process development/test mode only.
+        return
+    with engine.connect() as connection:
+        locked = connection.scalar(text('SELECT pg_try_advisory_lock(1380339761)'))
+        connection.commit()
+        if not locked:
+            raise RuntimeError('Another ReplyForge worker is already active')
+        try:
+            yield connection
+        finally:
+            if not connection.invalidated:
+                connection.execute(text('SELECT pg_advisory_unlock(1380339761)'))
+                connection.commit()
