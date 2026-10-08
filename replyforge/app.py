@@ -23,7 +23,7 @@ from .config import ConfigError, Settings, load_playbook
 from .database import session_factory, session_scope
 from .agent import AIEngine
 from .models import (
-    Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, Message, Outbox, Ticket, TicketNote, OperatorDraft, utcnow
+    Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, KnowledgeSuggestion, Message, Outbox, Ticket, TicketNote, OperatorDraft, utcnow
 )
 from .security import constant_time_equal, fingerprint, redact, subscription_token_fingerprint
 from .playbooks import active_version, activate_version, effective_playbook, save_playbook
@@ -199,6 +199,8 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 "worker_alive": worker_is_alive(session),
                 "dead_updates": session.scalar(select(func.count(Event.update_id)).where(
                     Event.status == "dead")) or 0,
+                "pending_learning": session.scalar(select(func.count(KnowledgeSuggestion.id)).where(
+                    KnowledgeSuggestion.status == "pending")) or 0,
                 "positive_feedback": session.scalar(select(func.count(Audit.id)).where(
                     Audit.action == "feedback_positive")) or 0,
                 "negative_feedback": session.scalar(select(func.count(Audit.id)).where(
@@ -656,6 +658,55 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             session.add(Audit(conversation_id=conv.id, actor="admin", action="resume"))
         return RedirectResponse(f"/admin/conversations/{conversation_id}", status_code=303)
 
+
+    @app.get("/admin/knowledge/review", response_class=HTMLResponse)
+    def review_knowledge(request: Request, _=Depends(authenticate)):
+        with session_scope(request.app.state.factory) as session:
+            suggestions = session.scalars(select(KnowledgeSuggestion).where(
+                KnowledgeSuggestion.status == "pending",
+            ).order_by(desc(KnowledgeSuggestion.id)).limit(50)).all()
+            current, _v = effective_playbook(session, request.app.state.playbook)
+            return templates.TemplateResponse(request, "knowledge-review.html", {
+                "suggestions": suggestions, "csrf": csrf_value(request),
+                "locale": current.get("locale", "en"),
+            })
+
+    @app.post("/admin/knowledge/review/{suggestion_id}")
+    def review_knowledge_action(
+        request: Request, suggestion_id: int,
+        decision: str = Form(...), question: str = Form(""),
+        answer: str = Form(""), csrf_token: str = Form(...),
+        _=Depends(authenticate),
+    ):
+        csrf(request, csrf_token)
+        if decision not in ("approve", "reject"):
+            raise HTTPException(422, detail="Invalid review action")
+        if decision == "approve" and (
+            not question.strip() or not answer.strip()
+            or len(question) > 500 or len(answer) > 4000
+        ):
+            raise HTTPException(422, detail="Approved FAQ must have question and answer")
+        with session_scope(request.app.state.factory) as session:
+            suggestion = session.scalar(select(KnowledgeSuggestion).where(
+                KnowledgeSuggestion.id == suggestion_id).with_for_update())
+            if suggestion is None:
+                raise HTTPException(404, detail="Suggestion not found")
+            if suggestion.status != "pending":
+                raise HTTPException(409, detail="Suggestion already reviewed")
+            if decision == "approve":
+                session.add(Knowledge(
+                    question=redact(question.strip()),
+                    answer=redact(answer.strip()),
+                    enabled=True,
+                ))
+                suggestion.status = "approved"
+            else:
+                suggestion.status = "rejected"
+            suggestion.reviewed_at = utcnow()
+            session.add(Audit(actor="operator", action="knowledge_review",
+                              detail=str(suggestion.id) + ":" + decision))
+        return RedirectResponse("/admin/knowledge/review", status_code=303)
+
     @app.post("/admin/knowledge")
     def add_knowledge(request: Request, question: str = Form(...), answer: str = Form(...),
                       csrf_token: str = Form(...), _=Depends(authenticate)):
@@ -732,6 +783,22 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             ticket.resolved_at = utcnow()
             ticket.resolution_summary = redact(resolution.strip()) or None
             ticket.updated_at = utcnow()
+            if ticket.resolution_summary:
+                previous = session.scalar(select(KnowledgeSuggestion.id).where(
+                    KnowledgeSuggestion.ticket_id == ticket.id,
+                ).limit(1))
+                inbound = session.scalar(select(Message).where(
+                    Message.conversation_id == ticket.conversation_id,
+                    Message.direction == "in",
+                    Message.content != "[expired]",
+                ).order_by(desc(Message.id)).limit(1))
+                if previous is None and inbound and inbound.content.strip():
+                    session.add(KnowledgeSuggestion(
+                        ticket_id=ticket.id,
+                        question=redact(inbound.content)[:500],
+                        answer=ticket.resolution_summary,
+                        status="pending",
+                    ))
             conv = session.get(Conversation, ticket.conversation_id)
             if conv.owner == "human_pending":
                 conv.owner = "human"  # never resume AI implicitly
