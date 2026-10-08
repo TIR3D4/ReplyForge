@@ -18,7 +18,7 @@ Report vulnerabilities privately to the repository owner through GitHub's privat
 
 ## Data retention
 
-V1 records workflow history and support tickets until an operator deletes/archives records at the database level. Deployers are responsible for publishing a privacy policy and implementing a deletion process. Do not claim automatic GDPR compliance or permanent data minimization.
+By default, the worker scrubs message contents and Telegram media file IDs older than DATA_RETENTION_DAYS (180 days), and old terminal outbound texts and internal suggestions/notes. Set DATA_RETENTION_DAYS=0 to disable automatic scrubbing. This does not remove conversation IDs, billing records, database backups or data stored by Telegram, model providers, or VPN panels; deployers still need a suitable privacy and backup-retention policy.
 
 ## Limitations
 

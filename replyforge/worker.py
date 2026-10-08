@@ -16,6 +16,7 @@ from .models import (
 )
 from .security import redact
 from .playbooks import effective_playbook
+from .privacy import prune_history
 from .telegram import TelegramClient, TelegramError
 from .workflow import (
     Proposal, accept_input, apply_action, build_markup, callback_action, root_menu
@@ -642,10 +643,21 @@ class Processor:
     def run(self):
         log.info("ReplyForge worker started")
         next_heartbeat = 0.0
+        next_privacy_sweep = 0.0
         while True:
-            if time.monotonic() >= next_heartbeat:
+            now = time.monotonic()
+            if now >= next_heartbeat:
                 self.heartbeat()
-                next_heartbeat = time.monotonic() + 15
+                next_heartbeat = now + 15
+            if now >= next_privacy_sweep:
+                try:
+                    with session_scope(self.factory) as db:
+                        counts = prune_history(db, self.settings.retention_days)
+                    if any(counts.values()):
+                        log.info("Privacy retention scrub complete: %s", counts)
+                except Exception:
+                    log.exception("Privacy retention scrub failed")
+                next_privacy_sweep = now + 6 * 3600
             if not self.tick():
                 time.sleep(self.settings.poll_seconds)
 

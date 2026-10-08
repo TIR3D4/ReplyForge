@@ -30,6 +30,7 @@ class Settings:
     webhook_path: str
     poll_seconds: float
     message_debounce_ms: int
+    retention_days: int
     max_llm_calls_per_chat_per_day: int
     auto_reply_enabled: bool
     vision_enabled: bool
@@ -66,6 +67,7 @@ class Settings:
             webhook_path=g("WEBHOOK_PATH", "/telegram/webhook"),
             poll_seconds=float(g("WORKER_POLL_SECONDS", "1")),
             message_debounce_ms=int(g("MESSAGE_DEBOUNCE_MS", "1200")),
+            retention_days=int(g("DATA_RETENTION_DAYS", "180")),
             max_llm_calls_per_chat_per_day=int(g("MAX_LLM_CALLS_PER_CHAT_PER_DAY", "40")),
             auto_reply_enabled=g("AUTO_REPLY_ENABLED", "false").lower() == "true",
             vision_enabled=g("AI_VISION_ENABLED", "false").lower() == "true",
@@ -104,6 +106,8 @@ class Settings:
             raise ConfigError("AI_MEDIA_MAX_BYTES must be 64KB–10MB")
         if obj.max_llm_calls_per_chat_per_day < 0:
             raise ConfigError("MAX_LLM_CALLS_PER_CHAT_PER_DAY cannot be negative")
+        if obj.retention_days != 0 and not 7 <= obj.retention_days <= 3650:
+            raise ConfigError("DATA_RETENTION_DAYS must be 0 or 7–3650")
         if not 0 <= obj.message_debounce_ms <= 5000:
             raise ConfigError("MESSAGE_DEBOUNCE_MS must be between 0 and 5000")
         if obj.poll_seconds <= 0 or obj.lease_seconds < 20:
