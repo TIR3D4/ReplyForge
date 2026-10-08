@@ -16,15 +16,15 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select, text
+from sqlalchemy import case, desc, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 
 from .config import ConfigError, Settings, load_playbook
 from .database import session_factory, session_scope
 from .models import (
-    Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, Message, Outbox, Ticket, utcnow
+    Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, Message, Outbox, Ticket, TicketNote, utcnow
 )
-from .security import constant_time_equal, fingerprint, subscription_token_fingerprint
+from .security import constant_time_equal, fingerprint, redact, subscription_token_fingerprint
 from .playbooks import active_version, activate_version, effective_playbook, save_playbook
 from .models import PlaybookVersion
 from .telegram import TelegramClient, TelegramError
@@ -181,7 +181,17 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 "bindings": session.scalars(select(Binding).order_by(desc(Binding.id)).limit(40)).all(),
                 "uncertain": session.scalars(select(Outbox).where(Outbox.status == "uncertain").order_by(desc(Outbox.id)).limit(20)).all(),
                 "total_conversations": session.scalar(select(func.count(Conversation.id))),
-                "open_tickets": session.scalar(select(func.count(Ticket.id)).where(Ticket.status == "open")),
+                "open_tickets": session.scalar(select(func.count(Ticket.id)).where(
+                    Ticket.status.in_(("open", "in_progress")))),
+                "overdue_tickets": session.scalar(select(func.count(Ticket.id)).where(
+                    Ticket.status.in_(("open", "in_progress")),
+                    Ticket.first_response_at.is_(None),
+                    Ticket.sla_due_at < utcnow(),
+                )) or 0,
+                "urgent_tickets": session.scalar(select(func.count(Ticket.id)).where(
+                    Ticket.status.in_(("open", "in_progress")),
+                    Ticket.priority == "urgent",
+                )) or 0,
                 "sent_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status == "sent")),
                 "pending_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status.in_(("pending", "sending")))),
                 "auto_reply_enabled": auto_reply_enabled(session, request.app.state.settings),
@@ -214,8 +224,15 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             outbound = session.scalars(select(Outbox).where(Outbox.conversation_id == conversation_id,
                 Outbox.kind == "human").order_by(Outbox.id.desc()).limit(20)).all()
             current, _version = effective_playbook(session, request.app.state.playbook)
+            ticket = session.scalar(select(Ticket).where(
+                Ticket.conversation_id == conv.id,
+            ).order_by(desc(Ticket.id)).limit(1))
+            notes = session.scalars(select(TicketNote).where(
+                TicketNote.ticket_id == ticket.id,
+            ).order_by(desc(TicketNote.id)).limit(60)).all() if ticket else []
             return templates.TemplateResponse(request, "conversation.html", {
                 "conv": conv, "messages": list(reversed(messages)), "outbound": outbound,
+                "ticket": ticket, "notes": notes,
                 "csrf": csrf_value(request),
                 "locale": current.get("locale", "en"),
                 "_": lambda en, fa: fa if current.get("locale") == "fa" else en,
@@ -366,6 +383,15 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 raise HTTPException(status_code=409, detail="Telegram Business reply window expired")
             conv.owner = "human"
             conv.revision += 1
+            ticket = session.scalar(select(Ticket).where(
+                Ticket.conversation_id == conv.id,
+                Ticket.status.in_(("open", "in_progress")),
+            ).order_by(desc(Ticket.id)).limit(1))
+            if ticket is not None:
+                ticket.status = "in_progress"
+                ticket.first_response_at = ticket.first_response_at or utcnow()
+                ticket.assignee = ticket.assignee or _
+                ticket.updated_at = utcnow()
             session.add(Outbox(conversation_id=conv.id, revision=conv.revision,
                                kind="human", text=message.strip(), buttons=[]))
             session.add(Audit(conversation_id=conv.id, actor="operator",
@@ -460,15 +486,26 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         return RedirectResponse("/admin#uncertain", status_code=303)
 
     @app.post("/admin/tickets/{ticket_id}/close")
-    def close_ticket(request: Request, ticket_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
+    def close_ticket(request: Request, ticket_id: int, csrf_token: str = Form(...),
+                     resolution: str = Form(""), _=Depends(authenticate)):
         csrf(request, csrf_token)
+        if len(resolution) > 2000:
+            raise HTTPException(422, detail="Resolution summary exceeds 2000 characters")
         with session_scope(request.app.state.factory) as session:
             ticket = session.get(Ticket, ticket_id)
             if ticket is None:
                 raise HTTPException(404)
             ticket.status = "closed"
+            ticket.resolved_at = utcnow()
+            ticket.resolution_summary = redact(resolution.strip()) or None
             ticket.updated_at = utcnow()
-        return RedirectResponse("/admin#tickets", status_code=303)
+            conv = session.get(Conversation, ticket.conversation_id)
+            if conv.owner == "human_pending":
+                conv.owner = "human"  # never resume AI implicitly
+                conv.revision += 1
+            session.add(Audit(conversation_id=conv.id, actor="operator",
+                              action="ticket_closed", detail=str(ticket.id)))
+        return RedirectResponse("/admin/tickets", status_code=303)
 
     return app
 
