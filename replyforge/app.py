@@ -212,6 +212,139 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 "_": lambda en, fa: fa if current.get("locale") == "fa" else en,
             })
 
+
+    @app.get("/admin/tickets", response_class=HTMLResponse)
+    def ticket_queue(
+        request: Request, ticket_status: str = "open", priority: str = "all",
+        search: str = "", page: int = 1, _=Depends(authenticate),
+    ):
+        if ticket_status not in ("open", "in_progress", "closed", "all"):
+            raise HTTPException(422, detail="Invalid ticket status")
+        if priority not in ("all", "low", "normal", "high", "urgent"):
+            raise HTTPException(422, detail="Invalid priority")
+        if not 1 <= page <= 1000 or len(search) > 64:
+            raise HTTPException(422, detail="Invalid page or search")
+        with session_scope(request.app.state.factory) as session:
+            conditions = []
+            if ticket_status == "open":
+                conditions.append(Ticket.status.in_(("open", "in_progress")))
+            elif ticket_status != "all":
+                conditions.append(Ticket.status == ticket_status)
+            if priority != "all":
+                conditions.append(Ticket.priority == priority)
+            if search.strip():
+                phrase = search.strip()
+                if phrase.isdecimal():
+                    conditions.append(or_(Ticket.id == int(phrase),
+                        Ticket.conversation_id.in_(select(Conversation.id).where(
+                            Conversation.chat_id == int(phrase)))))
+                else:
+                    conditions.append(Ticket.reason.ilike("%" + phrase + "%"))
+            count = session.scalar(select(func.count(Ticket.id)).where(*conditions)) or 0
+            priority_order = case(
+                (Ticket.priority == "urgent", 0),
+                (Ticket.priority == "high", 1),
+                (Ticket.priority == "normal", 2),
+                else_=3,
+            )
+            tickets = session.scalars(select(Ticket).where(*conditions).order_by(
+                priority_order, Ticket.sla_due_at, desc(Ticket.created_at),
+            ).offset((page - 1) * 30).limit(30)).all()
+            conv_map = {c.id: c for c in session.scalars(
+                select(Conversation).where(
+                    Conversation.id.in_([t.conversation_id for t in tickets])
+                )).all()} if tickets else {}
+            current, _version = effective_playbook(session, request.app.state.playbook)
+            return templates.TemplateResponse(request, "tickets.html", {
+                "tickets": tickets, "count": count, "page": page,
+                "pages": max(1, (count + 29) // 30),
+                "ticket_status": ticket_status, "priority": priority,
+                "search": search, "conv_map": conv_map,
+                "csrf": csrf_value(request), "locale": current.get("locale", "en"),
+                "now": utcnow(),
+            })
+
+    @app.post("/admin/tickets/{ticket_id}/triage")
+    def update_ticket_triage(
+        request: Request, ticket_id: int, csrf_token: str = Form(...),
+        priority: str = Form(...), category: str = Form("general"),
+        assignee: str = Form(""), status_value: str = Form("open"),
+        _=Depends(authenticate),
+    ):
+        csrf(request, csrf_token)
+        if (priority not in ("low", "normal", "high", "urgent")
+                or status_value not in ("open", "in_progress")
+                or not category.strip() or len(category) > 50 or len(assignee) > 100):
+            raise HTTPException(422, detail="Invalid ticket metadata")
+        with session_scope(request.app.state.factory) as session:
+            ticket = session.scalar(select(Ticket).where(
+                Ticket.id == ticket_id).with_for_update())
+            if ticket is None:
+                raise HTTPException(404, detail="Ticket not found")
+            if ticket.status == "closed":
+                raise HTTPException(409, detail="Reopen the ticket before triaging")
+            ticket.priority = priority
+            ticket.category = category.strip()
+            ticket.assignee = assignee.strip() or None
+            ticket.status = status_value
+            ticket.updated_at = utcnow()
+            if status_value == "in_progress":
+                conv = session.get(Conversation, ticket.conversation_id)
+                if conv.owner != "human":
+                    conv.owner = "human"
+                    conv.revision += 1
+            session.add(Audit(conversation_id=ticket.conversation_id,
+                              actor="operator", action="ticket_triage",
+                              detail=str(ticket.id) + ":" + status_value + ":" + priority))
+        return RedirectResponse("/admin/tickets", status_code=303)
+
+    @app.post("/admin/tickets/{ticket_id}/notes")
+    def add_ticket_note(request: Request, ticket_id: int,
+                        content: str = Form(...), csrf_token: str = Form(...),
+                        operator: str = Depends(authenticate)):
+        csrf(request, csrf_token)
+        if not content.strip() or len(content) > 2000:
+            raise HTTPException(422, detail="Note must be 1–2000 characters")
+        with session_scope(request.app.state.factory) as session:
+            ticket = session.get(Ticket, ticket_id)
+            if ticket is None:
+                raise HTTPException(404, detail="Ticket not found")
+            session.add(TicketNote(
+                ticket_id=ticket_id, author=operator, content=redact(content.strip()),
+            ))
+            ticket.updated_at = utcnow()
+            session.add(Audit(conversation_id=ticket.conversation_id, actor="operator",
+                              action="ticket_private_note", detail=str(ticket_id)))
+            conversation_id = ticket.conversation_id
+        return RedirectResponse("/admin/conversations/" + str(conversation_id),
+                                status_code=303)
+
+    @app.post("/admin/tickets/{ticket_id}/reopen")
+    def reopen_ticket(request: Request, ticket_id: int,
+                      csrf_token: str = Form(...), _=Depends(authenticate)):
+        csrf(request, csrf_token)
+        with session_scope(request.app.state.factory) as session:
+            ticket = session.get(Ticket, ticket_id)
+            if ticket is None:
+                raise HTTPException(404, detail="Ticket not found")
+            if ticket.status != "closed":
+                raise HTTPException(409, detail="Ticket is already active")
+            current, _revision = effective_playbook(session, request.app.state.playbook)
+            sla = current.get("support_sla_minutes", 60)
+            minutes = sla if type(sla) is int and 5 <= sla <= 1440 else 60
+            ticket.status = "open"
+            ticket.first_response_at = None
+            ticket.resolved_at = None
+            ticket.escalated_at = None
+            ticket.sla_due_at = utcnow() + timedelta(minutes=minutes)
+            ticket.updated_at = utcnow()
+            conv = session.get(Conversation, ticket.conversation_id)
+            conv.owner = "human_pending"
+            conv.revision += 1
+            session.add(Audit(conversation_id=conv.id, actor="operator",
+                              action="ticket_reopen", detail=str(ticket.id)))
+        return RedirectResponse("/admin/tickets", status_code=303)
+
     @app.get("/admin/conversations/{conversation_id}", response_class=HTMLResponse)
     def conversation_detail(request: Request, conversation_id: int, _=Depends(authenticate)):
         with session_scope(request.app.state.factory) as session:
