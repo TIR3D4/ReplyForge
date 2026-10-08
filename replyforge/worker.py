@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import logging
+import signal
+import threading
 import time
 
 from sqlalchemy import func, select, text
@@ -135,6 +137,7 @@ def record_inbound(session: Session, conv: Conversation, message: dict) -> bool:
 class Processor:
     def __init__(self, settings: Settings, factory, telegram: TelegramClient):
         self.settings = settings
+        self.stop_requested = threading.Event()
         self.factory = factory
         self.telegram = telegram
         self.playbook = load_playbook(settings.business_config)
@@ -272,8 +275,15 @@ class Processor:
                 existing.updated_at = utcnow()
             session.add(Audit(conversation_id=conv.id, actor="owner", action="takeover"))
             return
+        newest_id = session.scalar(select(func.max(Message.telegram_message_id)).where(
+            Message.conversation_id == conv.id, Message.direction == "in",
+        ))
         if not record_inbound(session, conv, message):
             return
+        if newest_id is not None and message["message_id"] < newest_id:
+            session.add(Audit(conversation_id=conv.id, actor="system",
+                              action="late_message_archived"))
+            return  # Keep evidence; never feed late input into a newer workflow step.
         # Persist each constituent message independently. Only the prompt/context
         # is combined; Telegram message IDs and attachments remain traceable.
         accepted_messages = [message]
@@ -449,13 +459,15 @@ class Processor:
                 # never coalesced with a customer message or discarded.
                 if key[2] != (conn.owner_user_id if conn else None):
                     next_events = session.scalars(select(Event).where(
-                        Event.status == "pending",
+                        Event.status.in_(("pending", "processing")),
                         Event.update_id > update_id,
                     ).order_by(Event.update_id).limit(MAX_TEXT_BATCH).with_for_update(
                         skip_locked=True,
                     )).all()
                     total = len(source["text"])
                     for next_event in next_events:
+                        if next_event.status != "pending" or next_event.attempts:
+                            break
                         incoming = (next_event.payload or {}).get("business_message")
                         if not self._batchable(incoming):
                             break
@@ -663,15 +675,23 @@ class Processor:
                 row.updated_at = utcnow()
 
     def run(self):
-        with exclusive_worker(self.factory.kw["bind"]) as guard:
-            self._run_loop(guard)
+        previous = {}
+        if threading.current_thread() is threading.main_thread():
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                previous[sig] = signal.signal(sig, lambda *_: self.stop_requested.set())
+        try:
+            with exclusive_worker(self.factory.kw["bind"]) as guard:
+                self._run_loop(guard)
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
 
     def _run_loop(self, guard=None):
         log.info("ReplyForge worker started")
         next_heartbeat = 0.0
         next_privacy_sweep = 0.0
         next_sla_sweep = 0.0
-        while True:
+        while not self.stop_requested.is_set():
             if guard is not None:
                 guard.execute(text("SELECT 1"))
                 guard.commit()
@@ -696,7 +716,7 @@ class Processor:
                     log.exception("Privacy retention scrub failed")
                 next_privacy_sweep = now + 6 * 3600
             if not self.tick():
-                time.sleep(self.settings.poll_seconds)
+                self.stop_requested.wait(self.settings.poll_seconds)
 
 
 def _aware(value: datetime):

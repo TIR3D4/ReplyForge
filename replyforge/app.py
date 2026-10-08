@@ -297,8 +297,11 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 or not category.strip() or len(category) > 50 or len(assignee) > 100):
             raise HTTPException(422, detail="Invalid ticket metadata")
         with session_scope(request.app.state.factory) as session:
-            ticket = session.scalar(select(Ticket).where(
-                Ticket.id == ticket_id).with_for_update())
+            ticket = session.get(Ticket, ticket_id)
+            if ticket is not None:
+                # Same order as delivery: conversation first, then ticket.
+                session.get(Conversation, ticket.conversation_id, with_for_update=True)
+                session.refresh(ticket, with_for_update=True)
             if ticket is None:
                 raise HTTPException(404, detail="Ticket not found")
             if ticket.status == "closed":
@@ -345,6 +348,9 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         csrf(request, csrf_token)
         with session_scope(request.app.state.factory) as session:
             ticket = session.get(Ticket, ticket_id)
+            if ticket is not None:
+                session.get(Conversation, ticket.conversation_id, with_for_update=True)
+                session.refresh(ticket, with_for_update=True)
             if ticket is None:
                 raise HTTPException(404, detail="Ticket not found")
             if ticket.status != "closed":
@@ -864,6 +870,9 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             raise HTTPException(422, detail="Resolution summary exceeds 2000 characters")
         with session_scope(request.app.state.factory) as session:
             ticket = session.get(Ticket, ticket_id)
+            if ticket is not None:
+                session.get(Conversation, ticket.conversation_id, with_for_update=True)
+                session.refresh(ticket, with_for_update=True)
             if ticket is None:
                 raise HTTPException(404)
             ticket.status = "closed"

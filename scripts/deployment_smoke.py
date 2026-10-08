@@ -3,7 +3,6 @@
 from pathlib import Path
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import time
@@ -60,6 +59,7 @@ def main():
                 raise RuntimeError('Worker did not become ready')
             wait_ready()
             run('restart','worker','api')
+            port = run('port','api','8080',capture_output=True,text=True).stdout.strip().rsplit(':',1)[1]
             wait_ready()
             dump = run('exec','-T','db','pg_dump','-U','replyforge','-d','replyforge','-Fc',capture_output=True).stdout
             run('exec','-T','db','createdb','-U','replyforge','restore_check')
@@ -67,6 +67,10 @@ def main():
             restored = run('exec','-T','db','psql','-U','replyforge','-d','restore_check','-Atc','SELECT version_num FROM alembic_version',capture_output=True,text=True).stdout.strip()
             assert restored == '0010_operators', restored
             print('PASS: migrations, API/worker readiness, restart, dump and isolated restore')
+        except Exception:
+            run('ps', '--all')
+            run('logs', '--tail', '100', 'api', 'worker', 'init')
+            raise
         finally:
             run('down','--volumes','--remove-orphans')
 
