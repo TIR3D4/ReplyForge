@@ -4,7 +4,7 @@
 
 ReplyForge is a **self-hosted, open-source Telegram Business support system** that responds from your *existing* Telegram account through the official Business Bot API. It combines editable inline menus, a declarative support playbook, optional AI intent recognition, a human escalation inbox, an audit trail, and integration adapters. It is not a userbot and does not require sharing an MTProto login session.
 
-[Setup](#quick-start) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Playbooks](docs/WORKFLOWS.md) · [API](docs/API.md) · [Persian guide](docs/README-fa.md)
+[Setup](#quick-start) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Playbooks](docs/WORKFLOWS.md) · [API](docs/API.md) · [Persian guide](docs/README-fa.md) · [Live acceptance tests](docs/SMOKE_TEST.md)
 
 ## V1 support hardening — release candidate
 
@@ -22,6 +22,10 @@ ReplyForge is a **self-hosted, open-source Telegram Business support system** th
 ### Explicit boundaries
 
 V1 is **not** an autonomous payment verifier. A receipt image is collected as evidence for a human; it is not proof that money arrived. It does not automatically issue, renew, revoke or delete subscriptions. It does not read an existing customer's Telegram history from before Business Bot connection, and it does not guarantee network reachability just because an account is active. The base product is a single-deployment workspace; run isolated deployments for separate businesses. Real Telegram and provider credentials are required for production integration tests.
+
+## Production activation criteria
+
+**V1.0.0rc1 is a release candidate, not a claim of production certification.** New deployments default to monitor-only. Before enabling AI for real customers, complete the staged checklist in [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md), using the *actual* Telegram Business connection and installed Marzban/Pasarguard versions. CI cannot replace this live acceptance test.
 
 ## Quick start
 
