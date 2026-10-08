@@ -152,6 +152,21 @@ class AIEngine:
         for op in options:
             if source in (str(op["value"]).casefold(), str(op["label"]).casefold()):
                 return str(op["value"])
+        # Telegram labels can start with emoji. Match natural short responses
+        # against their readable text without spending any AI tokens.
+        phrase = " ".join(re.findall(r"[\w\u0600-\u06ff]+", source)).strip()
+        possible = []
+        if len(phrase) >= 3:
+            for op in options:
+                label = " ".join(re.findall(r"[\w\u0600-\u06ff]+",
+                                            str(op["label"]).casefold()))
+                value = str(op["value"]).casefold()
+                if phrase == label or phrase == value or (
+                    len(label) >= 3 and label in phrase
+                ):
+                    possible.append(str(op["value"]))
+            if len(set(possible)) == 1:
+                return possible[0]
         if len(options) == 2:
             if any(x in source for x in ("نشد", "not work", "still", "failed", "nope")):
                 return str(options[-1]["value"])
