@@ -4,6 +4,8 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import hashlib
 import hmac
+from copy import deepcopy
+import yaml
 from pathlib import Path
 
 from fastapi import (
@@ -200,7 +202,49 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 "source": source, "brand": current["brand"],
                 "version": version, "revisions": revisions,
                 "csrf": csrf_value(request), "locale": current.get("locale", "en"),
+                "config": current, "flow_names": list(current.get("workflows", {})),
             })
+
+    @app.post("/admin/playbook/basic")
+    def quick_customize(request: Request, csrf_token: str = Form(...),
+                        brand: str = Form(...), locale: str = Form(...),
+                        welcome: str = Form(...), handoff_text: str = Form(...),
+                        resolution_text: str = Form(...),
+                        menu_label: list[str] = Form(...),
+                        menu_action: list[str] = Form(...),
+                        _=Depends(authenticate)):
+        csrf(request, csrf_token)
+        if (locale not in ("fa", "en") or len(brand) > 100
+                or len(welcome) > 1200 or len(handoff_text) > 1200
+                or len(resolution_text) > 1200 or len(menu_label) > 12
+                or len(menu_label) != len(menu_action)):
+            raise HTTPException(422, detail="Invalid quick configuration")
+        with session_scope(request.app.state.factory) as session:
+            current, _version = effective_playbook(session, request.app.state.playbook)
+            custom = deepcopy(current)
+            items = []
+            for label, action in zip(menu_label, menu_action):
+                label = label.strip()
+                if label:
+                    if len(label) > 80 or len(action) > 100:
+                        raise HTTPException(422, detail="Invalid menu item")
+                    items.append({"label": label, "action": action})
+            if not items:
+                raise HTTPException(422, detail="At least one menu button is required")
+            custom.update({
+                "brand": brand.strip(), "locale": locale, "welcome": welcome.strip(),
+                "handoff_text": handoff_text.strip(),
+                "resolution_text": resolution_text.strip(), "menu": items,
+            })
+            try:
+                version = save_playbook(session, yaml.safe_dump(
+                    custom, allow_unicode=True, sort_keys=False,
+                ))
+                session.add(Audit(actor="admin", action="playbook_quick_edit",
+                                  detail=str(version.id)))
+            except (ConfigError, ValueError) as exc:
+                raise HTTPException(422, detail=str(exc)) from exc
+        return RedirectResponse("/admin/playbook", status_code=303)
 
     @app.post("/admin/playbook")
     def update_playbook(request: Request, source: str = Form(...), csrf_token: str = Form(...),
