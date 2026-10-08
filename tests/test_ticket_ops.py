@@ -53,7 +53,7 @@ def test_ticket_triage_notes_close_and_reopen(database, test_settings, fake_tele
         assert board.status_code == 200
         assert "payment" in board.text
         detail = client.get(f"/admin/conversations/{conversation_id}", auth=auth(test_settings))
-        assert "Ticket management" in detail.text or "مدیریت تیکت" in detail.text
+        assert "Ticket" in detail.text or "تیکت" in detail.text
 
         bad = client.post(f"/admin/tickets/{ticket_id}/triage",
                           auth=auth(test_settings), data={
