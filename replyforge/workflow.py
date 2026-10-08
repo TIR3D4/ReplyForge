@@ -4,15 +4,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import secrets
 from datetime import datetime, timezone
+import re
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .agent import AIEngine
 from .config import Settings
 from .integrations import ProviderError, describe, lookup
-from .models import Binding, Conversation, Knowledge, Ticket
-from .security import extract_link, fingerprint, redact
+from .models import Audit, Binding, Conversation, Knowledge, Ticket
+from .security import extract_link, fingerprint, redact, subscription_token_fingerprint
 
 
 @dataclass
@@ -21,6 +22,30 @@ class Proposal:
     actions: list[tuple[str, str]] = field(default_factory=list)
     menu: bool = True
 
+
+
+
+def infer_customer_slots(text: str) -> dict[str, str]:
+    """Extract obvious customer-provided device/app details without an LLM call."""
+    value = (text or "").casefold()
+    slots: dict[str, str] = {}
+    if any(x in value for x in ("آیفون", "ایفون", "iphone", "ios")):
+        slots["device"] = "ios"
+    elif any(x in value for x in ("اندروید", "android", "سامسونگ", "شیائومی")):
+        slots["device"] = "android"
+    elif any(x in value for x in ("ویندوز", "windows", "لپ تاپ", "لپ‌تاپ")):
+        slots["device"] = "windows"
+    for name, aliases in (
+        ("v2rayNG", ("v2rayng", "وی تو ری ان جی")),
+        ("V2Box", ("v2box", "وی تو باکس")),
+        ("Streisand", ("streisand", "استرایسند")),
+        ("Happ", ("happ",)),
+        ("Hiddify", ("hiddify", "هیدیفای")),
+    ):
+        if any(re.search(r"\b" + re.escape(alias) + r"\b", value) for alias in aliases):
+            slots["application"] = name
+            break
+    return slots
 
 def is_fa(playbook):
     return playbook.get("locale") == "fa"
@@ -56,14 +81,30 @@ def _display_state(session: Session, conversation: Conversation, playbook: dict,
     for _ in range(10):
         flow = playbook["workflows"][conversation.workflow]
         state = flow["states"][conversation.step]
+        # Don't re-ask what the customer already explicitly told us during this flow.
+        if conversation.workflow == "connection" and conversation.step in ("device", "app"):
+            field = "device" if conversation.step == "device" else "application"
+            prefilled = (conversation.state or {}).get("recent_slots", {}).get(field)
+            if prefilled and state.get("field") == field and state.get("next"):
+                data = dict(conversation.state or {})
+                answers = dict(data.get("answers") or {})
+                answers[field] = prefilled
+                data["answers"] = answers
+                data["recent_slots"] = {k: v for k, v in data["recent_slots"].items() if k != field}
+                conversation.state = data
+                conversation.step = state["next"]
+                continue
         kind = state.get("type")
         if kind == "handoff":
             return human(session, conversation, playbook, reason=conversation.workflow)
         if kind == "complete":
             conversation.workflow = None
             conversation.step = None
-            return Proposal(playbook.get("resolution_text", "Done."),
-                            [("🏠 منوی اصلی" if is_fa(playbook) else "🏠 Main menu", "home")])
+            question = "مشکلت کامل حل شد؟" if is_fa(playbook) else "Was your issue resolved?"
+            return Proposal(playbook.get("resolution_text", "Done.") + "\n\n" + question,
+                            [("✅ بله" if is_fa(playbook) else "✅ Yes", "feedback:yes"),
+                             ("❌ نه" if is_fa(playbook) else "❌ No", "feedback:no"),
+                             ("🏠 منو" if is_fa(playbook) else "🏠 Menu", "home")])
         if kind == "knowledge":
             q = str((conversation.state or {}).get("answers", {}).get("question", ""))
             entries = session.scalars(select(Knowledge).where(Knowledge.enabled.is_(True))).all()
@@ -91,7 +132,9 @@ def start_flow(session: Session, conv: Conversation, playbook: dict, ai: AIEngin
         return root_menu(playbook)
     conv.workflow = name
     conv.step = flow["start"]
-    conv.state = {"answers": {}, "flow_started_at": datetime.now(timezone.utc).isoformat()}
+    prior_slots = dict((conv.state or {}).get("recent_slots") or {})
+    conv.state = {"answers": {}, "recent_slots": prior_slots,
+                  "flow_started_at": datetime.now(timezone.utc).isoformat()}
     return _display_state(session, conv, playbook, ai, settings)
 
 
@@ -101,6 +144,15 @@ def apply_action(session: Session, conv: Conversation, playbook: dict, ai: AIEng
         return Proposal(playbook.get("handoff_text", "Human assistance is active."), [], False)
     if action == "human":
         return human(session, conv, playbook)
+    if action == "feedback:yes":
+        session.add(Audit(conversation_id=conv.id, actor="customer", action="feedback_positive"))
+        return Proposal(
+            "ممنون از بازخوردت 🌿" if is_fa(playbook) else "Thanks for your feedback!",
+            [("🏠 منوی اصلی" if is_fa(playbook) else "🏠 Main menu", "home")],
+        )
+    if action == "feedback:no":
+        session.add(Audit(conversation_id=conv.id, actor="customer", action="feedback_negative"))
+        return human(session, conv, playbook, reason="unsolved_after_guidance")
     if action == "home":
         conv.workflow = None
         conv.step = None
@@ -138,6 +190,11 @@ def accept_input(session: Session, conv: Conversation, playbook: dict, ai: AIEng
     if conv.owner != "ai":
         return Proposal("", [], False)
     lowered = text.casefold()
+    slots = infer_customer_slots(text)
+    if slots:
+        info = dict(conv.state or {})
+        info["recent_slots"] = {**info.get("recent_slots", {}), **slots}
+        conv.state = info
     if any(hint in lowered for hint in ("پشتیبان انسانی", "اپراتور انسانی", "human support", "speak to human")):
         return human(session, conv, playbook)
     if lowered.strip() in ("منو", "منوی اصلی", "menu", "/start"):
@@ -176,11 +233,19 @@ def accept_input(session: Session, conv: Conversation, playbook: dict, ai: AIEng
         url = extract_link(text)
         if not url:
             return _display_state(session, conv, playbook, ai, settings)
-        binding = session.scalar(select(Binding).where(
-            Binding.link_hmac == fingerprint(url, settings.binding_pepper),
-        ))
-        if binding is None or (binding.customer_chat_id is not None and binding.customer_chat_id != conv.chat_id):
+        digest = fingerprint(url, settings.binding_pepper)
+        token_digest = subscription_token_fingerprint(url, settings.binding_pepper)
+        clauses = [Binding.link_hmac == digest]
+        if token_digest is not None:
+            clauses.append(Binding.token_hmac == token_digest)
+        matches = session.scalars(select(Binding).where(or_(*clauses))).all()
+        matches = [entry for entry in matches if (
+            entry.customer_chat_id is None or entry.customer_chat_id == conv.chat_id
+        )]
+        # Ambiguous or unknown ownership is never resolved by guessing.
+        if len(matches) != 1:
             return human(session, conv, playbook, reason="subscription_unmatched")
+        binding = matches[0]
         try:
             status = lookup(settings, binding.provider, binding.user_ref)
         except ProviderError:
@@ -220,10 +285,17 @@ def build_markup(conversation: Conversation, actions: list[tuple[str, str]]):
     data["menu_nonce"] = nonce
     data["menu_actions"] = [action for _, action in actions]
     conversation.state = data
-    rows = [
-        [{"text": label[:50], "callback_data": f"rf:{nonce}:{idx}"}]
+    buttons = [
+        {"text": label[:50], "callback_data": f"rf:{nonce}:{idx}"}
         for idx, (label, _action) in enumerate(actions[:20])
     ]
+    rows: list[list[dict]] = []
+    for button in buttons:
+        if (rows and len(rows[-1]) == 1 and
+                len(rows[-1][0]["text"]) <= 22 and len(button["text"]) <= 22):
+            rows[-1].append(button)
+        else:
+            rows.append([button])
     return {"inline_keyboard": rows} if rows else None
 
 

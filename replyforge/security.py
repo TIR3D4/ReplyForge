@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 CONFIG_LINK = re.compile(r"(?i)(?:https?://[^\s<>]+|(?:vless|vmess|trojan|ss|hysteria2|hy2|tuic|wg)://[^\s<>]+)")
 BANK_CARD = re.compile(r"(?<!\d)\d{13,19}(?!\d)")
@@ -42,3 +42,26 @@ def ensure_public_http_url(value: str) -> None:
     split = urlsplit(value)
     if split.scheme != "https" or not split.hostname:
         raise ValueError("An HTTPS URL is required")
+
+
+def subscription_token_fingerprint(link: str, pepper: str) -> str | None:
+    """Match relay-domain links without storing a plaintext bearer subscription URL.
+
+    This is for matching ONLY; we never fetch the customer-provided URL. A
+    sufficiently long bearer token is required to prevent enumeration of short IDs.
+    """
+    try:
+        parsed = urlsplit(link.strip())
+    except ValueError:
+        return None
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return None
+    segments = [unquote(part) for part in parsed.path.split("/") if part]
+    if segments and segments[-1].lower() in ("info", "raw", "usage", "apps"):
+        segments.pop()
+    if not segments:
+        return None
+    token = segments[-1]
+    if not 16 <= len(token) <= 512 or not re.fullmatch(r"[A-Za-z0-9_.=+-]+", token):
+        return None
+    return fingerprint("subscription-token:" + token, pepper)

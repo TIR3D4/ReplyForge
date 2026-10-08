@@ -52,3 +52,15 @@ The model selects only predefined menu actions or options. It cannot execute SQL
 - No per-account business settings within one deployment.
 - No semantic vector embeddings or image OCR in V1; approved FAQ lookup uses lexical search plus optional model selection from a bounded list. Images are collected for manual review.
 - Database schema is initialized by Alembic migration 0001 on first boot. All future schema changes require reviewed forward migrations, backups and a staging rehearsal.
+
+
+## V1.1 support-hardening additions
+
+- Monitor-only startup and audited admin automation switch.
+- Real human reply outbox, operator message capture, follow-up evidence alerts, safe menu handoff edits.
+- Optional bounded screenshot and voice analysis; financial documents excluded from model vision.
+- Subscription catalog backfill and URL-token fingerprints for trusted relay-domain links.
+- Durable worker heartbeat and readiness endpoint; explicit human-feedback outcome metrics.
+- Rule-based slot extraction prevents redundant device/application questions.
+
+The LLM remains a bounded classifier and approved-FAQ selector; it is **not** given arbitrary terminal, database or network tools. A privacy-controlled learning pipeline and end-to-end production integrations need additional review before full autonomy.

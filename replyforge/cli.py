@@ -10,11 +10,17 @@ from alembic import command
 from alembic.config import Config
 from .telegram import TelegramClient
 from .worker import Processor
+from .catalog import sync_provider
+from .database import session_scope
+from .syncer import run_periodically
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="replyforge")
-    parser.add_argument("command", choices=["init", "worker", "webhook-info", "set-webhook", "check-config"])
+    parser.add_argument("command", choices=["init", "worker", "webhook-info", "set-webhook", "check-config", "sync-subscriptions", "sync-daemon"])
+    parser.add_argument("--provider", choices=["marzban", "pasarguard", "both"], default="both")
+    parser.add_argument("--limit", type=int, default=2000, help="Maximum users per provider, up to 20000")
+    parser.add_argument("--interval-minutes", type=int, default=60, help="sync-daemon polling interval (5-1440)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     s = Settings.from_env(strict=args.command not in ("check-config",))
@@ -28,6 +34,22 @@ def main() -> None:
         alembic_cfg.set_main_option("sqlalchemy.url", s.database_url.replace("%", "%%"))
         command.upgrade(alembic_cfg, "head")
         print("ReplyForge migrations up to date.")
+        return
+    if args.command == "sync-daemon":
+        run_periodically(s, factory, args.provider, args.limit, args.interval_minutes)
+        return
+    if args.command == "sync-subscriptions":
+        providers = ("marzban", "pasarguard") if args.provider == "both" else (args.provider,)
+        for provider in providers:
+            try:
+                with session_scope(factory) as db:
+                    summary = sync_provider(db, s, provider, max_users=args.limit)
+                    print(provider, "fetched:", summary.fetched, "new:", summary.inserted,
+                          "updated:", summary.updated, "skipped:", summary.skipped,
+                          "conflicts:", summary.conflicted)
+            except Exception as exc:
+                logging.error("Subscription sync failed for %s (%s)", provider, type(exc).__name__)
+                raise SystemExit(2) from exc
         return
     bot = TelegramClient(s.bot_token)
     try:

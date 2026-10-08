@@ -30,6 +30,12 @@ class Settings:
     webhook_path: str
     poll_seconds: float
     max_llm_calls_per_chat_per_day: int
+    auto_reply_enabled: bool
+    vision_enabled: bool
+    voice_enabled: bool
+    media_max_bytes: int
+    ai_vision_model: str
+    ai_transcription_model: str
     lease_seconds: int
     ai_api_key: str
     ai_base_url: str
@@ -59,6 +65,12 @@ class Settings:
             webhook_path=g("WEBHOOK_PATH", "/telegram/webhook"),
             poll_seconds=float(g("WORKER_POLL_SECONDS", "1")),
             max_llm_calls_per_chat_per_day=int(g("MAX_LLM_CALLS_PER_CHAT_PER_DAY", "40")),
+            auto_reply_enabled=g("AUTO_REPLY_ENABLED", "false").lower() == "true",
+            vision_enabled=g("AI_VISION_ENABLED", "false").lower() == "true",
+            voice_enabled=g("AI_VOICE_ENABLED", "false").lower() == "true",
+            media_max_bytes=int(g("AI_MEDIA_MAX_BYTES", "5242880")),
+            ai_vision_model=g("AI_VISION_MODEL", g("AI_MODEL", "gpt-4.1-mini")),
+            ai_transcription_model=g("AI_TRANSCRIPTION_MODEL", "whisper-1"),
             lease_seconds=int(g("WORKER_LEASE_SECONDS", "120")),
             ai_api_key=g("AI_API_KEY"),
             ai_base_url=g("AI_BASE_URL", "https://api.openai.com/v1"),
@@ -86,6 +98,8 @@ class Settings:
                 raise ConfigError("Secrets must be at least 16 characters")
         if obj.support_alert_chat_id == 0:
             raise ConfigError("SUPPORT_ALERT_CHAT_ID must be a non-zero Telegram chat ID")
+        if not 65536 <= obj.media_max_bytes <= 10485760:
+            raise ConfigError("AI_MEDIA_MAX_BYTES must be 64KB–10MB")
         if obj.max_llm_calls_per_chat_per_day < 0:
             raise ConfigError("MAX_LLM_CALLS_PER_CHAT_PER_DAY cannot be negative")
         if obj.poll_seconds <= 0 or obj.lease_seconds < 20:

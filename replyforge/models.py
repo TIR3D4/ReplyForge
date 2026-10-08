@@ -96,6 +96,7 @@ class Binding(Base):
     __tablename__ = "subscription_bindings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     link_hmac: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    token_hmac: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     provider: Mapped[str] = mapped_column(String(24), nullable=False)
     user_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     label: Mapped[str] = mapped_column(String(255), default="")
@@ -121,3 +122,11 @@ class PlaybookVersion(Base):
     source: Mapped[str] = mapped_column(Text, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Control(Base):
+    """Runtime automation flags; never store credentials here."""
+    __tablename__ = "controls"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[str] = mapped_column(String(200), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

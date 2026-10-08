@@ -12,18 +12,24 @@ from .agent import AIEngine
 from .config import Settings, load_playbook
 from .database import claim, session_scope
 from .models import (
-    Audit, BusinessConnection, Conversation, Event, Message, Outbox, Ticket, utcnow
+    Audit, BusinessConnection, Conversation, Control, Event, Message, Outbox, Ticket, utcnow
 )
 from .security import redact
 from .playbooks import effective_playbook
 from .telegram import TelegramClient, TelegramError
 from .workflow import (
-    accept_input, apply_action, build_markup, callback_action, root_menu
+    Proposal, accept_input, apply_action, build_markup, callback_action, root_menu
 )
 
 log = logging.getLogger(__name__)
 
 REPLY_WINDOW = timedelta(hours=23, minutes=50)
+
+
+def auto_reply_enabled(session: Session, settings: Settings) -> bool:
+    flag = session.get(Control, "auto_reply_enabled")
+    return flag.value == "true" if flag else settings.auto_reply_enabled
+
 
 
 def update_connection(session: Session, data: dict) -> BusinessConnection:
@@ -39,6 +45,17 @@ def update_connection(session: Session, data: dict) -> BusinessConnection:
     conn.updated_at = utcnow()
     session.flush()
     return conn
+
+
+def worker_is_alive(session: Session, *, max_age_seconds: int = 65) -> bool:
+    flag = session.get(Control, "worker_heartbeat")
+    if not flag:
+        return False
+    try:
+        stamp = datetime.fromisoformat(flag.value)
+        return (utcnow() - _aware(stamp)).total_seconds() <= max_age_seconds
+    except (ValueError, TypeError):
+        return False
 
 
 def get_connection(session: Session, telegram: TelegramClient, connection_id: str) -> BusinessConnection:
@@ -67,7 +84,8 @@ def save_proposal(session: Session, conv: Conversation, proposal) -> None:
     session.add(Outbox(
         conversation_id=conv.id,
         revision=conv.revision,
-        kind="menu" if proposal.menu else "text",
+        kind=("menu" if proposal.menu else
+              "handoff" if conv.owner == "human_pending" else "text"),
         text=proposal.text[:4000],
         buttons=(markup or {}).get("inline_keyboard", []),
     ))
@@ -87,10 +105,14 @@ def record_inbound(session: Session, conv: Conversation, message: dict) -> bool:
     file_id = photo[-1].get("file_id") if photo else (
         document.get("file_id") if str(document.get("mime_type", "")).startswith("image/") else None
     )
+    voice = message.get("voice") or message.get("audio") or {}
+    if not file_id and isinstance(voice, dict):
+        file_id = voice.get("file_id")
+    kind = "voice" if voice else ("photo" if file_id else "text")
     text = message.get("text") or message.get("caption") or ""
     session.add(Message(
         conversation_id=conv.id, telegram_message_id=msg_id,
-        direction="in", content=redact(text), kind="photo" if file_id else "text",
+        direction="in", content=redact(text), kind=kind,
         data={"file_id": file_id} if file_id else {},
     ))
     conv.last_inbound_at = utcnow()
@@ -188,6 +210,8 @@ class Processor:
             return
 
         if callback:
+            if not auto_reply_enabled(session, self.settings):
+                return
             if (callback.get("from") or {}).get("id") != conv.chat_id:
                 return
             if conv.owner != "ai" or conv.menu_message_id != message.get("message_id"):
@@ -206,13 +230,30 @@ class Processor:
             return
         sender_id = (message.get("from") or {}).get("id")
         if conn.owner_user_id is not None and sender_id == conn.owner_user_id:
+            # Capture human operator teaching examples without treating them as
+            # customer inbound messages or reopening the reply window.
+            msg_id = message.get("message_id")
+            if msg_id is not None and session.scalar(select(Message.id).where(
+                Message.conversation_id == conv.id,
+                Message.telegram_message_id == msg_id,
+                Message.direction == "out",
+            )) is not None:
+                return
+            if msg_id is not None:
+                session.add(Message(
+                    conversation_id=conv.id, telegram_message_id=msg_id,
+                    direction="out", kind="human",
+                    content=redact(message.get("text") or message.get("caption") or ""),
+                ))
             conv.owner = "human"
             conv.revision += 1
             session.add(Audit(conversation_id=conv.id, actor="owner", action="takeover"))
             return
         if not record_inbound(session, conv, message):
             return
-        if conv.owner != "ai" or not conn.can_reply:
+        if conv.owner != "ai" or not conn.can_reply or not auto_reply_enabled(session, self.settings):
+            if conv.owner in ("human", "human_pending"):
+                self._queue_human_followup(session, conv, message)
             return
         photo = message.get("photo") or []
         document = message.get("document") or {}
@@ -220,10 +261,90 @@ class Processor:
             document.get("file_id") if str(document.get("mime_type", "")).startswith("image/") else None
         )
         text = message.get("text") or message.get("caption") or ""
-        proposal = accept_input(session, conv, playbook, self._agent(session, conv), self.settings, text, file_id)
+        ai = self._agent(session, conv)
+        voice = message.get("voice") or message.get("audio") or {}
+        if isinstance(voice, dict) and voice.get("file_id"):
+            try:
+                data = self.telegram.download(str(voice["file_id"]), self.settings.media_max_bytes)
+                transcript = ai.transcribe_voice(data)
+            except (TelegramError, ValueError, TypeError, AttributeError):
+                transcript = None
+            if transcript:
+                text = transcript
+            else:
+                proposal = Proposal(
+                    "🎙 ویست دریافت شد. لطفاً مشکل رو متنی بنویس یا اپراتور رو انتخاب کن."
+                    if playbook.get("locale") == "fa" else
+                    "🎙 Voice received. Please type your question or choose human support.",
+                    [("👨‍💻 اپراتور", "human"),
+                     ("🏠 منو", "home")],
+                )
+                conv.state = {**(conv.state or {}), "_playbook_version": version}
+                save_proposal(session, conv, proposal)
+                return
+        photo_expected = bool(
+            conv.workflow and conv.step and
+            playbook["workflows"].get(conv.workflow, {}).get("states", {})
+                .get(conv.step, {}).get("input") == "photo"
+        )
+        # Financial/payment evidence is NEVER sent to third-party vision APIs.
+        if (file_id and not photo_expected and conv.workflow == "connection"
+                and self.settings.vision_enabled):
+            try:
+                content = self.telegram.download(str(file_id), self.settings.media_max_bytes)
+                observation = ai.describe_screenshot(content)
+            except (TelegramError, ValueError, TypeError, AttributeError):
+                observation = None
+            if observation:
+                info = dict(conv.state or {})
+                info["screenshot_clues"] = observation
+                conv.state = info
+                text = (text + "\n" if text else "") + "مشاهده از اسکرین‌شات: " + observation
+        if file_id and not text and not photo_expected:
+            proposal = Proposal(
+                "📷 تصویر رو دریافت کردم. لطفاً بگو مربوط به کدوم مشکل هست یا موضوع رو از منو انتخاب کن."
+                if playbook.get("locale") == "fa" else
+                "📷 Image received. Tell me what went wrong or select a menu option.",
+                [("🏠 منوی اصلی", "home"), ("👨‍💻 اپراتور", "human")],
+            )
+        else:
+            proposal = accept_input(session, conv, playbook, ai, self.settings, text, file_id)
         conv.state = {**(conv.state or {}), "_playbook_version": version}
         save_proposal(session, conv, proposal)
         self._queue_operator_alert(session, conv)
+
+    def _queue_human_followup(self, session: Session, conv: Conversation, message: dict) -> None:
+        """Notify an already-assigned human if new evidence arrived."""
+        if not self.settings.support_alert_chat_id:
+            return
+        photo = message.get("photo") or []
+        doc = message.get("document") or {}
+        file_id = (photo[-1].get("file_id") if photo else
+                   (doc.get("file_id") if str(doc.get("mime_type", "")).startswith("image/")
+                    else None))
+        if file_id:
+            session.add(Outbox(
+                conversation_id=conv.id, revision=conv.revision,
+                kind="alert_photo", text="📎 New evidence in support chat " + str(conv.chat_id),
+                buttons=[{"file_id": file_id}],
+            ))
+        info = dict(conv.state or {})
+        previous = info.get("human_update_alert_at")
+        try:
+            last_time = datetime.fromisoformat(previous) if previous else None
+        except (ValueError, TypeError):
+            last_time = None
+        if last_time is not None and last_time.tzinfo is None:
+            last_time = last_time.replace(tzinfo=timezone.utc)
+        if last_time is None or (utcnow() - last_time) >= timedelta(seconds=90):
+            session.add(Outbox(
+                conversation_id=conv.id, revision=conv.revision,
+                kind="alert", text="💬 Customer " + str(conv.chat_id) +
+                " added a message to a human-owned support conversation.",
+                buttons=[],
+            ))
+            info["human_update_alert_at"] = utcnow().isoformat()
+            conv.state = info
 
     def _queue_operator_alert(self, session: Session, conv: Conversation) -> None:
         if not self.settings.support_alert_chat_id or conv.owner != "human_pending":
@@ -279,10 +400,18 @@ class Processor:
             conv = session.get(Conversation, job.conversation_id)
             conn = session.get(BusinessConnection, conv.business_connection_id)
             is_alert = job.kind in ("alert", "alert_photo")
-            if (conv.revision != job.revision or
-                    (not is_alert and (not conn.enabled or not conn.can_reply
-                    or not conv.last_inbound_at or (utcnow() - _aware(conv.last_inbound_at)) >= REPLY_WINDOW
-                    or (conv.owner != "ai" and job.kind != "text")))):
+            recent_inbound = bool(conv.last_inbound_at and
+                                  utcnow() - _aware(conv.last_inbound_at) < REPLY_WINDOW)
+            if job.kind == "human":
+                correct_owner = conv.owner == "human"
+            elif job.kind == "handoff":
+                correct_owner = conv.owner == "human_pending"
+            else:
+                correct_owner = conv.owner == "ai" and auto_reply_enabled(session, self.settings)
+            permitted = is_alert or (
+                conn.enabled and conn.can_reply and recent_inbound and correct_owner
+            )
+            if conv.revision != job.revision or not permitted:
                 job.status = "cancelled"
                 job.error_code = "obsolete_or_not_permitted"
                 return
@@ -308,7 +437,7 @@ class Processor:
                     raise TelegramError("missing_photo_id", status=400)
                 result = self.telegram.send_photo_admin(self.settings.support_alert_chat_id, file_id, text)
                 message_id = result["message_id"]
-            elif kind == "menu" and menu_id:
+            elif kind in ("menu", "handoff") and menu_id:
                 try:
                     self.telegram.edit(connection_id, chat_id, menu_id, text, markup=markup)
                     message_id = menu_id
@@ -348,7 +477,7 @@ class Processor:
             job.status = "sent"
             job.telegram_message_id = message_id
             job.claimed_until = None
-            if kind == "menu" and conv.revision == job.revision:
+            if kind in ("menu", "handoff") and conv.revision == job.revision:
                 conv.menu_message_id = message_id
             if kind not in ("alert", "alert_photo"):
                 session.add(Message(conversation_id=conv.id, telegram_message_id=None,
@@ -382,9 +511,22 @@ class Processor:
             return True
         return False
 
+    def heartbeat(self) -> None:
+        with session_scope(self.factory) as session:
+            row = session.get(Control, "worker_heartbeat")
+            if row is None:
+                session.add(Control(key="worker_heartbeat", value=utcnow().isoformat()))
+            else:
+                row.value = utcnow().isoformat()
+                row.updated_at = utcnow()
+
     def run(self):
         log.info("ReplyForge worker started")
+        next_heartbeat = 0.0
         while True:
+            if time.monotonic() >= next_heartbeat:
+                self.heartbeat()
+                next_heartbeat = time.monotonic() + 15
             if not self.tick():
                 time.sleep(self.settings.poll_seconds)
 

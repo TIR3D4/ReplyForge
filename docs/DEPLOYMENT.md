@@ -67,3 +67,28 @@ V1 uses an Alembic initial migration. The Compose init service applies pending m
 - [ ] Database backup and restore tested
 - [ ] User-facing privacy/retention policy published
 - [ ] Runbook for API outage and human takeover shared with operators
+
+
+## Safe activation
+
+ReplyForge starts in **monitor-only** mode (`AUTO_REPLY_ENABLED=false`). Connect Telegram Business, verify /readyz, send a test customer message and issue a human reply from /admin/conversations/ID. Add your approved knowledge base before switching AI on. Use the dashboard emergency pause button to turn off automatic responses without blocking human replies.
+
+## Importing customer VPN accounts
+
+Configure Marzban API credentials and a Pasarguard read-only API key. To index panel-issued subscription links without storing plaintext bearer URLs:
+
+    docker compose exec api replyforge sync-subscriptions --provider both --limit 2000
+
+This is a read-only catalog import; run after subscription creation/rotation or schedule it through your own maintenance tooling. Panel API versions and subscription URL shapes must be verified on the installed instances. Ambiguous mappings require manual intervention.
+
+## Media and privacy
+
+Image interpretation and voice transcription are disabled until AI_VISION_ENABLED or AI_VOICE_ENABLED are explicitly enabled. A subset of technical customer media is transferred to the configured AI provider when enabled. Receipt evidence stays on the operator path; it is not automatically treated as confirmed payment. Publish a privacy policy and a retention/deletion procedure.
+
+## Worker readiness
+
+Check /readyz in addition to /healthz. A green /healthz only proves the web API can query the database; /readyz additionally requires a recent worker heartbeat. Monitor dead inbox events and uncertain outbox messages, and do not blindly resend uncertain deliveries.
+
+## Optional automatic VPN subscription catalog refresh
+
+After verifying both panel APIs and rate limits, run `docker compose --profile vpn up -d catalog` to enable the isolated, read-only `sync-daemon` service (default interval: 60 minutes, max users/provider 2000). It never mutates subscriptions, and failure of one panel does not block the Telegram worker or the other panel. Periodic sync status is retained in `controls`. Deploy only one catalog instance.

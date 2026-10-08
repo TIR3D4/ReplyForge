@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import (
     Body, Depends, FastAPI, Form, Header, HTTPException, Request
 )
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -21,12 +21,13 @@ from sqlalchemy.exc import IntegrityError
 from .config import ConfigError, Settings, load_playbook
 from .database import session_factory, session_scope
 from .models import (
-    Audit, Binding, Conversation, Event, Knowledge, Message, Outbox, Ticket, utcnow
+    Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, Message, Outbox, Ticket, utcnow
 )
-from .security import constant_time_equal, fingerprint
+from .security import constant_time_equal, fingerprint, subscription_token_fingerprint
 from .playbooks import active_version, activate_version, effective_playbook, save_playbook
 from .models import PlaybookVersion
-from .telegram import TelegramClient
+from .telegram import TelegramClient, TelegramError
+from .worker import REPLY_WINDOW, _aware, auto_reply_enabled, worker_is_alive
 
 basic = HTTPBasic()
 templates = Jinja2Templates(directory="templates")
@@ -62,7 +63,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 engine.dispose()
 
     app = FastAPI(
-        title="ReplyForge", version="0.1.0", docs_url=None, redoc_url=None,
+        title="ReplyForge", version="1.0.0rc1", docs_url=None, redoc_url=None,
         lifespan=lifespan,
     )
 
@@ -96,6 +97,20 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         with session_scope(request.app.state.factory) as session:
             session.execute(text("SELECT 1"))
         return {"status": "ok", "service": "replyforge"}
+
+    @app.get("/readyz")
+    def readyz(request: Request):
+        with session_scope(request.app.state.factory) as session:
+            session.execute(text("SELECT 1"))
+            ready = worker_is_alive(session)
+            pending = session.scalar(select(func.count(Event.update_id)).where(
+                Event.status.in_(("pending", "processing")))) or 0
+            dead = session.scalar(select(func.count(Event.update_id)).where(
+                Event.status == "dead")) or 0
+        return JSONResponse({"status": "ready" if ready else "degraded",
+                             "worker": "alive" if ready else "stale_or_missing",
+                             "pending_updates": pending, "dead_updates": dead},
+                            status_code=200 if ready else 503)
 
     @app.post("/telegram/webhook")
     def telegram_webhook(request: Request, payload: dict = Body(...),
@@ -133,15 +148,18 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         if data.provider == "pasarguard" and not data.user_ref.isdecimal():
             raise HTTPException(status_code=422, detail="Pasarguard requires numeric user ID")
         digest = fingerprint(data.link, request.app.state.settings.binding_pepper)
+        token_hmac = subscription_token_fingerprint(
+            data.link, request.app.state.settings.binding_pepper)
         with session_scope(request.app.state.factory) as session:
             existing = session.scalar(select(Binding).where(Binding.link_hmac == digest))
             if existing is None:
-                existing = Binding(link_hmac=digest, provider=data.provider,
+                existing = Binding(link_hmac=digest, token_hmac=token_hmac, provider=data.provider,
                                    user_ref=data.user_ref, label=data.label,
                                    customer_chat_id=data.customer_chat_id)
                 session.add(existing)
             else:
                 existing.provider, existing.user_ref = data.provider, data.user_ref
+                existing.token_hmac = token_hmac
                 existing.label, existing.customer_chat_id = data.label, data.customer_chat_id
             session.flush()
             return {"id": existing.id, "provider": existing.provider, "saved": True}
@@ -159,6 +177,14 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 "open_tickets": session.scalar(select(func.count(Ticket.id)).where(Ticket.status == "open")),
                 "sent_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status == "sent")),
                 "pending_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status.in_(("pending", "sending")))),
+                "auto_reply_enabled": auto_reply_enabled(session, request.app.state.settings),
+                "worker_alive": worker_is_alive(session),
+                "dead_updates": session.scalar(select(func.count(Event.update_id)).where(
+                    Event.status == "dead")) or 0,
+                "positive_feedback": session.scalar(select(func.count(Audit.id)).where(
+                    Audit.action == "feedback_positive")) or 0,
+                "negative_feedback": session.scalar(select(func.count(Audit.id)).where(
+                    Audit.action == "feedback_negative")) or 0,
             }
             current, revision = effective_playbook(session, request.app.state.playbook)
             return templates.TemplateResponse(request, "dashboard.html", {
@@ -178,9 +204,11 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             messages = session.scalars(select(Message).where(
                 Message.conversation_id == conversation_id,
             ).order_by(Message.id.desc()).limit(100)).all()
+            outbound = session.scalars(select(Outbox).where(Outbox.conversation_id == conversation_id,
+                Outbox.kind == "human").order_by(Outbox.id.desc()).limit(20)).all()
             current, _version = effective_playbook(session, request.app.state.playbook)
             return templates.TemplateResponse(request, "conversation.html", {
-                "conv": conv, "messages": list(reversed(messages)),
+                "conv": conv, "messages": list(reversed(messages)), "outbound": outbound,
                 "csrf": csrf_value(request),
                 "locale": current.get("locale", "en"),
                 "_": lambda en, fa: fa if current.get("locale") == "fa" else en,
@@ -268,6 +296,75 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             session.add(Audit(actor="admin", action="playbook_restore", detail=str(version_id)))
         return RedirectResponse("/admin/playbook", status_code=303)
 
+    @app.get("/admin/media/{message_id}")
+    def operator_media(request: Request, message_id: int, _=Depends(authenticate)):
+        with session_scope(request.app.state.factory) as session:
+            message = session.get(Message, message_id)
+            file_id = (message.data or {}).get("file_id") if message else None
+        if not file_id:
+            raise HTTPException(status_code=404, detail="Media is not available")
+        try:
+            data = request.app.state.telegram.download(
+                str(file_id), request.app.state.settings.media_max_bytes)
+        except (TelegramError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail="Telegram media unavailable") from exc
+        if data.startswith(bytes.fromhex("ffd8ff")):
+            mime = "image/jpeg"
+        elif data.startswith(bytes.fromhex("89504e470d0a1a0a")):
+            mime = "image/png"
+        elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            mime = "image/webp"
+        elif data[:4] == b"OggS":
+            mime = "audio/ogg"
+        else:
+            raise HTTPException(status_code=415, detail="Unsupported media format")
+        return Response(content=data, media_type=mime, headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+        })
+
+    @app.post("/admin/automation")
+    def automation_toggle(request: Request, enabled: str = Form(...),
+                          csrf_token: str = Form(...), _=Depends(authenticate)):
+        csrf(request, csrf_token)
+        if enabled not in ("true", "false"):
+            raise HTTPException(status_code=422, detail="Invalid automation state")
+        with session_scope(request.app.state.factory) as session:
+            flag = session.get(Control, "auto_reply_enabled")
+            if flag is None:
+                session.add(Control(key="auto_reply_enabled", value=enabled))
+            else:
+                flag.value = enabled
+                flag.updated_at = utcnow()
+            session.add(Audit(actor="admin", action="automation_toggle", detail=enabled))
+        return RedirectResponse("/admin", status_code=303)
+
+    @app.post("/admin/conversations/{conversation_id}/reply")
+    def operator_reply(request: Request, conversation_id: int,
+                       message: str = Form(...), csrf_token: str = Form(...),
+                       _=Depends(authenticate)):
+        csrf(request, csrf_token)
+        if not message.strip() or len(message) > 3500:
+            raise HTTPException(status_code=422, detail="Message must be 1–3500 characters")
+        with session_scope(request.app.state.factory) as session:
+            conv = session.scalar(select(Conversation).where(
+                Conversation.id == conversation_id).with_for_update())
+            if conv is None:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            conn = session.get(BusinessConnection, conv.business_connection_id)
+            if not conn or not conn.enabled or not conn.can_reply:
+                raise HTTPException(status_code=409, detail="Telegram Business reply permission unavailable")
+            if not conv.last_inbound_at or utcnow() - _aware(conv.last_inbound_at) >= REPLY_WINDOW:
+                raise HTTPException(status_code=409, detail="Telegram Business reply window expired")
+            conv.owner = "human"
+            conv.revision += 1
+            session.add(Outbox(conversation_id=conv.id, revision=conv.revision,
+                               kind="human", text=message.strip(), buttons=[]))
+            session.add(Audit(conversation_id=conv.id, actor="operator",
+                              action="operator_reply_queued"))
+        return RedirectResponse(f"/admin/conversations/{conversation_id}", status_code=303)
+
     @app.post("/admin/conversations/{conversation_id}/takeover")
     def takeover(request: Request, conversation_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
         csrf(request, csrf_token)
@@ -322,11 +419,13 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         if provider == "pasarguard" and not user_ref.isdecimal():
             raise HTTPException(422)
         digest = fingerprint(link, request.app.state.settings.binding_pepper)
+        token_hmac = subscription_token_fingerprint(
+            link, request.app.state.settings.binding_pepper)
         with session_scope(request.app.state.factory) as session:
             entry = session.scalar(select(Binding).where(Binding.link_hmac == digest))
             if entry is None:
-                session.add(Binding(link_hmac=digest, provider=provider, user_ref=user_ref,
-                                    label=label[:255]))
+                session.add(Binding(link_hmac=digest, token_hmac=token_hmac, provider=provider,
+                                    user_ref=user_ref, label=label[:255]))
         return RedirectResponse("/admin#bindings", status_code=303)
 
     @app.post("/admin/tickets/{ticket_id}/close")

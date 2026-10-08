@@ -4,24 +4,28 @@
 
 ReplyForge is a **self-hosted, open-source Telegram Business support system** that responds from your *existing* Telegram account through the official Business Bot API. It combines editable inline menus, a declarative support playbook, optional AI intent recognition, a human escalation inbox, an audit trail, and integration adapters. It is not a userbot and does not require sharing an MTProto login session.
 
-[Setup](#quick-start) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Playbooks](docs/WORKFLOWS.md) · [API](docs/API.md) · [Persian guide](docs/README-fa.md)
+[Setup](#quick-start) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Playbooks](docs/WORKFLOWS.md) · [API](docs/API.md) · [Persian guide](docs/README-fa.md) · [Live acceptance tests](docs/SMOKE_TEST.md)
 
-## What works in V1
+## V1 support hardening — release candidate
 
 - Official Telegram Business connection, including Business permission updates, callbacks, manual-owner takeover, edited/deleted message handling.
-- One editable inline-menu message per customer when feasible; stale buttons are rejected and Telegram callback queries are acknowledged.
+- Compact one/two-column inline menu with editing instead of spamming new messages. Stale callbacks are rejected, and handoff edits clear old buttons.
 - Durable PostgreSQL inbox/outbox, idempotent incoming update IDs, safe unknown-delivery handling, and event retry limits.
 - Configurable YAML menus and **multi-step workflows**: ask for a choice, reference, image, question, subscription link; close or hand off.
-- AI-assisted intent, text-choice, and semantic selection of approved FAQs through an **optional OpenAI-compatible API**; per-chat model-call budgets protect costs. No LLM is required for deterministic flows.
+- Optional AI intent/choice recognition, semantic selection among approved FAQs, opt-in screenshot reading and opt-in voice transcription with strict file-size and daily model budgets. Rule-driven workflows continue when the model is unavailable.
 - A conservative, approved-only FAQ knowledge base. The model never makes up payment status or account balances.
-- Human handoff, automatically suspended AI replies and an operator dashboard with manual takeover/resume. Optional Telegram operator alerts, with attached receipt images forwarded to the operator chat.
-- Marzban and Pasarguard **read-only account status** via secure, pre-registered subscription-link fingerprints. The optional AzadBird preset includes Persian workflows.
+- Default **monitor-only** onboarding (AI replies disabled until an administrator opts in), emergency pause, human handoff, a real operator reply composer, inbound evidence notifications and customer-confirmed resolution tracking.
+- Marzban and Pasarguard **read-only account status**, optional catalog sync and HMAC token matching across trusted panel/relay domain variants. The AzadBird preset handles Persian VPN and payment triage.
 - Internal link-provisioning API for a store/billing integration. No arbitrary customer URL is fetched.
 - English default preset, Persian VPN preset, responsive dashboard and tests.
 
 ### Explicit boundaries
 
 V1 is **not** an autonomous payment verifier. A receipt image is collected as evidence for a human; it is not proof that money arrived. It does not automatically issue, renew, revoke or delete subscriptions. It does not read an existing customer's Telegram history from before Business Bot connection, and it does not guarantee network reachability just because an account is active. The base product is a single-deployment workspace; run isolated deployments for separate businesses. Real Telegram and provider credentials are required for production integration tests.
+
+## Production activation criteria
+
+**V1.0.0rc1 is a release candidate, not a claim of production certification.** New deployments default to monitor-only. Before enabling AI for real customers, complete the staged checklist in [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md), using the *actual* Telegram Business connection and installed Marzban/Pasarguard versions. CI cannot replace this live acceptance test.
 
 ## Quick start
 
@@ -45,7 +49,8 @@ Requirements: Docker Compose v2, PostgreSQL persistent volume, a domain with HTT
    - docker compose exec api replyforge webhook-info
 6. In @BotFather enable Business/Secretary Mode; in Telegram Settings > Business > Chatbots, connect the bot to your support account, permit message reading and replying, and select the correct incoming chats.
 7. Open https://YOUR_DOMAIN/admin and authenticate with ADMIN_USERNAME and ADMIN_PASSWORD. Add approved FAQs and, if using VPN support, subscription associations.
-8. To receive human-ticket notifications in a Telegram chat, first start the bot or invite it into your operator group, then set SUPPORT_ALERT_CHAT_ID and restart the containers.
+8. For human-ticket notifications, start the bot or invite it into a controlled operator group, then set SUPPORT_ALERT_CHAT_ID and restart.
+9. **Start in monitor-only mode.** Check /readyz for worker health, inspect real incoming messages, and test operator replies first. Only then click **Enable AI replies** on /admin.
 
 For guided secret generation, run python3 scripts/setup.py --preset generic or --preset azadbird before starting Compose. Existing .env files are never overwritten.
 
@@ -61,13 +66,13 @@ Edit active menus, prompts and workflows directly in /admin/playbook with valida
 
 ## AI operation
 
-With AI_API_KEY empty, the system still handles all button-driven workflows and a limited set of keyword intents. If configured, an OpenAI-compatible chat completion endpoint is used to choose from **allowed** menu actions or workflow choices. It never invents new actions or calls external tools directly. The approved knowledge-answer path returns the stored answer, not model-generated account or financial claims.
+With AI_API_KEY empty, the system still handles all button-driven workflows and a limited set of keyword intents. AI_VISION_ENABLED and AI_VOICE_ENABLED default to false; enabling them sends selected technical screenshots or voice messages to the configured AI provider. Payment evidence is explicitly excluded from model vision. If configured, an OpenAI-compatible chat completion endpoint is used to choose from **allowed** menu actions or workflow choices. It never invents new actions or calls external tools directly. The approved knowledge-answer path returns the stored answer, not model-generated account or financial claims.
 
 ## Provider adapters
 
-For Marzban provide MARZBAN_BASE_URL, MARZBAN_USERNAME and MARZBAN_PASSWORD. For Pasarguard provide PASARGUARD_BASE_URL and PASARGUARD_API_KEY (scope the key to read-only users permissions). Register each subscription link against its panel username (Marzban) or numeric user ID (Pasarguard) through the admin form or internal provisioning API. Only an HMAC of the original link is stored.
+For Marzban provide MARZBAN_BASE_URL, MARZBAN_USERNAME and MARZBAN_PASSWORD. For Pasarguard provide PASARGUARD_BASE_URL and PASARGUARD_API_KEY with users.read scope. Import panel-issued subscription links using `docker compose exec api replyforge sync-subscriptions --provider both --limit 2000` (or sync one provider), or provision from the admin UI/internal API. Only HMAC fingerprints are stored, never raw links.
 
-A customer sending the exact registered subscription URL can request status. If the link is unknown or the API is unavailable, the workflow opens a human ticket instead of guessing. Never paste panel admin credentials into chat.
+The original subscription URL or a forwarded/relayed URL containing the same sufficiently long secret token can match an imported account. No customer URL is fetched. Ambiguous, missing or unauthorized matches open a human ticket. The customer must possess the subscription link; this should be treated as a bearer credential. Never paste panel admin credentials into chat.
 
 ## Operating principles
 
@@ -75,7 +80,8 @@ A customer sending the exact registered subscription URL can request status. If 
 - **State, not just chat history**: workflow, step, answers, menu nonce, revision and human ownership are in PostgreSQL.
 - **Least privilege**: model chooses approved actions only; integration adapters expose read-only lookups.
 - **Auditable**: human takeovers and resumes are recorded.
-- **Human-first**: manual ownership overrides AI and unresolved cases become tickets.
+- **Human-first**: manual ownership overrides AI, operator replies can be sent from the dashboard, and unresolved cases become tickets.
+- **Staged operation**: new installs are monitor-only until explicitly activated; readiness and dead-letter counts are visible at /readyz.
 
 See docs/DEPLOYMENT.md for backups, secret rotation, known tradeoffs, and a production go-live checklist.
 
@@ -93,3 +99,5 @@ The CI workflow checks compilation and unit/integration tests with mock Telegram
 ## License
 
 Apache-2.0. Contributions are welcome. Read SECURITY.md before reporting vulnerabilities.
+
+To keep newly issued subscriptions available without manual imports, enable the **optional** isolated sync process with `docker compose --profile vpn up -d catalog`. It runs once per hour by default, only reads the configured panel APIs, and keeps a last-sync status. Its errors do not stop Telegram support processing. Require the real panel versions to pass a staging import before enabling.
