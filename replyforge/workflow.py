@@ -228,10 +228,17 @@ def build_markup(conversation: Conversation, actions: list[tuple[str, str]]):
     data["menu_nonce"] = nonce
     data["menu_actions"] = [action for _, action in actions]
     conversation.state = data
-    rows = [
-        [{"text": label[:50], "callback_data": f"rf:{nonce}:{idx}"}]
+    buttons = [
+        {"text": label[:50], "callback_data": f"rf:{nonce}:{idx}"}
         for idx, (label, _action) in enumerate(actions[:20])
     ]
+    rows: list[list[dict]] = []
+    for button in buttons:
+        if (rows and len(rows[-1]) == 1 and
+                len(rows[-1][0]["text"]) <= 22 and len(button["text"]) <= 22):
+            rows[-1].append(button)
+        else:
+            rows.append([button])
     return {"inline_keyboard": rows} if rows else None
 
 
