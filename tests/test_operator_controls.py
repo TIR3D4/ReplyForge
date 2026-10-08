@@ -98,3 +98,33 @@ def test_human_reply_uses_business_identity_with_ai_paused(database, test_settin
         conv = db.scalar(select(Conversation))
         assert conv.owner == "human"
         assert db.scalar(select(Outbox)).status == "sent"
+
+
+def test_emergency_pause_cancels_queued_ai_reply(database, test_settings, fake_telegram):
+    _seed(database)
+    p = Processor(test_settings, database, fake_telegram)
+    with session_scope(database) as db:
+        db.add(Event(update_id=91, payload=_inbound(91), status="processing"))
+    p.process_event(91)
+    with session_scope(database) as db:
+        db.add(Control(key="auto_reply_enabled", value="false"))
+    assert p.tick() is True
+    assert fake_telegram.sent == []
+    with session_scope(database) as db:
+        assert db.scalar(select(Outbox)).status == "cancelled"
+
+
+def test_human_takeover_preempts_queued_ai_reply(database, test_settings, fake_telegram):
+    _seed(database)
+    p = Processor(test_settings, database, fake_telegram)
+    with session_scope(database) as db:
+        db.add(Event(update_id=92, payload=_inbound(92), status="processing"))
+    p.process_event(92)
+    with session_scope(database) as db:
+        c = db.scalar(select(Conversation))
+        c.owner = "human"
+        c.revision += 1
+    p.tick()
+    assert fake_telegram.sent == []
+    with session_scope(database) as db:
+        assert db.scalar(select(Outbox)).status == "cancelled"
