@@ -662,8 +662,16 @@ class Processor:
         log.info("ReplyForge worker started")
         next_heartbeat = 0.0
         next_privacy_sweep = 0.0
+        next_sla_sweep = 0.0
         while True:
             now = time.monotonic()
+            if now >= next_sla_sweep:
+                try:
+                    # SLA checks must not starve when new events continuously arrive.
+                    self.check_sla()
+                except Exception:
+                    log.exception("SLA periodic sweep failed")
+                next_sla_sweep = now + 30
             if now >= next_heartbeat:
                 self.heartbeat()
                 next_heartbeat = now + 15

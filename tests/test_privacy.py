@@ -34,7 +34,8 @@ def test_retention_scrubs_text_and_file_ids_but_not_recent_records(database):
                       created_at=old))
         db.add(OperatorDraft(conversation_id=conv.id, text="old draft",
                              source="fallback", status="suggested", created_at=old))
-        ticket = Ticket(conversation_id=conv.id, status="closed")
+        ticket = Ticket(conversation_id=conv.id, status="closed",
+                        resolved_at=old, resolution_summary="sensitive old summary")
         db.add(ticket)
         db.flush()
         db.add(TicketNote(ticket_id=ticket.id, author="operator",
@@ -46,6 +47,7 @@ def test_retention_scrubs_text_and_file_ids_but_not_recent_records(database):
         result = prune_history(db, retention_days=180)
         assert result == {
             "messages": 1, "outbox": 1, "notes": 1, "drafts": 1, "suggestions": 1,
+            "ticket_summaries": 1,
         }
     with session_scope(database) as db:
         messages = db.scalars(select(Message).order_by(Message.id)).all()
@@ -57,6 +59,7 @@ def test_retention_scrubs_text_and_file_ids_but_not_recent_records(database):
         assert outputs[1].text == "uncertain should remain"
         assert db.scalar(select(OperatorDraft)).status == "expired"
         assert db.scalar(select(TicketNote)).content == "[expired]"
+        assert db.scalar(select(Ticket)).resolution_summary == "[expired]"
         candidate = db.scalar(select(KnowledgeSuggestion))
         assert candidate.question == "[expired]"
         assert candidate.status == "expired"

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import (
-    KnowledgeSuggestion, Message, OperatorDraft, Outbox, TicketNote, utcnow,
+    KnowledgeSuggestion, Message, OperatorDraft, Outbox, Ticket, TicketNote, utcnow,
 )
 
 EXPIRED = "[expired]"
@@ -14,7 +14,7 @@ EXPIRED = "[expired]"
 
 def prune_history(session: Session, retention_days: int, *, batch_size: int = 250) -> dict[str, int]:
     """Scrub old content without deleting ticket lifecycle or dependency relationships."""
-    counts = {"messages": 0, "outbox": 0, "notes": 0, "drafts": 0, "suggestions": 0}
+    counts = {"messages": 0, "outbox": 0, "notes": 0, "drafts": 0, "suggestions": 0, "ticket_summaries": 0}
     if retention_days == 0:
         return counts
     if not 7 <= retention_days <= 3650 or not 1 <= batch_size <= 1000:
@@ -64,4 +64,13 @@ def prune_history(session: Session, retention_days: int, *, batch_size: int = 25
         if item.status == "pending":
             item.status = "expired"
     counts["suggestions"] = len(candidates)
+
+    summaries = session.scalars(select(Ticket).where(
+        Ticket.resolved_at < cutoff,
+        Ticket.resolution_summary.is_not(None),
+        Ticket.resolution_summary != EXPIRED,
+    ).order_by(Ticket.id).limit(batch_size)).all()
+    for ticket in summaries:
+        ticket.resolution_summary = EXPIRED
+    counts["ticket_summaries"] = len(summaries)
     return counts
