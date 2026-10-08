@@ -53,7 +53,7 @@ class AIEngine:
                     "max_tokens": 250,
                     "messages": [
                         {"role": "system", "content": system},
-                        {"role": "user", "content": user[:1800]},
+                        {"role": "user", "content": redact(user)[:1800]},
                     ],
                 }, headers={"Authorization": "Bearer " + self.settings.ai_api_key})
                 r.raise_for_status()

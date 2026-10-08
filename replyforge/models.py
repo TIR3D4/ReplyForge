@@ -65,6 +65,7 @@ class Outbox(Base):
     __tablename__ = "outbox"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     conversation_id: Mapped[int] = mapped_column(Integer, ForeignKey("conversations.id"), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     kind: Mapped[str] = mapped_column(String(16), default="menu")
     text: Mapped[str] = mapped_column(Text, nullable=False)

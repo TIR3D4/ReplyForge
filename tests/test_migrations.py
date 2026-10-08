@@ -19,7 +19,7 @@ def test_alembic_initial_schema_is_repeatable_and_matches_models(tmp_path):
     command.upgrade(cfg, "head")  # safe to rerun after restart
     engine = create_engine(url)
     with engine.connect() as conn:
-        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == "0007_knowledge_review"
+        assert conn.scalar(text("SELECT version_num FROM alembic_version")) == "0008_delivery_attempts"
         for table in Base.metadata.tables:
             assert table in inspect(conn).get_table_names()
         delta = compare_metadata(MigrationContext.configure(conn), Base.metadata)

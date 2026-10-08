@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, delete, desc, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 
+from .http_security import RequestBoundary
 from .config import ConfigError, Settings, load_playbook
 from .database import session_factory, session_scope
 from .agent import AIEngine
@@ -68,6 +69,8 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         title="ReplyForge", version="1.1.0rc1", docs_url=None, redoc_url=None,
         lifespan=lifespan,
     )
+
+    app.add_middleware(RequestBoundary)
 
     def secret_token(request: Request):
         return request.app.state.settings.binding_pepper
@@ -122,8 +125,6 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             raise HTTPException(status_code=500, detail="Configured webhook path mismatch")
         if telegram_secret is None or not constant_time_equal(s.webhook_secret, telegram_secret):
             raise HTTPException(status_code=403, detail="Forbidden")
-        if int(request.headers.get("content-length") or "0") > 262144:
-            raise HTTPException(status_code=413, detail="Update too large")
         update_id = payload.get("update_id")
         if type(update_id) is not int or update_id < 0:
             raise HTTPException(status_code=400, detail="Invalid update_id")
@@ -351,7 +352,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
     @app.get("/admin/conversations/{conversation_id}", response_class=HTMLResponse)
     def conversation_detail(request: Request, conversation_id: int, _=Depends(authenticate)):
         with session_scope(request.app.state.factory) as session:
-            conv = session.get(Conversation, conversation_id)
+            conv = session.get(Conversation, conversation_id, with_for_update=True)
             if conv is None:
                 raise HTTPException(404)
             messages = session.scalars(select(Message).where(
@@ -513,7 +514,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         """Operator-only, cost-bounded draft; deliberately never sends to Telegram."""
         csrf(request, csrf_token)
         with session_scope(request.app.state.factory) as session:
-            conv = session.get(Conversation, conversation_id)
+            conv = session.get(Conversation, conversation_id, with_for_update=True)
             if conv is None:
                 raise HTTPException(404, detail="Conversation not found")
             history = list(reversed(session.scalars(select(Message).where(
@@ -706,7 +707,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
     def takeover(request: Request, conversation_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
         csrf(request, csrf_token)
         with session_scope(request.app.state.factory) as session:
-            conv = session.get(Conversation, conversation_id)
+            conv = session.get(Conversation, conversation_id, with_for_update=True)
             if conv is None:
                 raise HTTPException(404)
             conv.owner = "human"
@@ -718,7 +719,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
     def resume(request: Request, conversation_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
         csrf(request, csrf_token)
         with session_scope(request.app.state.factory) as session:
-            conv = session.get(Conversation, conversation_id)
+            conv = session.get(Conversation, conversation_id, with_for_update=True)
             if conv is None:
                 raise HTTPException(404)
             conv.owner = "ai"

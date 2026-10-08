@@ -119,7 +119,15 @@ def record_inbound(session: Session, conv: Conversation, message: dict) -> bool:
         direction="in", content=redact(text), kind=kind,
         data={"file_id": file_id} if file_id else {},
     ))
-    conv.last_inbound_at = utcnow()
+    # Telegram's timestamp, not processing time, defines the reply window.
+    stamp = message.get("date")
+    try:
+        received = datetime.fromtimestamp(stamp, timezone.utc) if type(stamp) is int else utcnow()
+    except (ValueError, OverflowError, OSError):
+        received = datetime.fromtimestamp(0, timezone.utc)
+    received = min(received, utcnow())
+    if conv.last_inbound_at is None or received > _aware(conv.last_inbound_at):
+        conv.last_inbound_at = received
     return True
 
 
@@ -511,6 +519,7 @@ class Processor:
             connection_id = conn.id
             chat_id = conv.chat_id
             menu_id = conv.menu_message_id
+            job.attempts += 1
             kind = job.kind
             markup = {"inline_keyboard": job.buttons} if job.buttons else None
             text = job.text
@@ -549,9 +558,9 @@ class Processor:
         except TelegramError as exc:
             with session_scope(self.factory) as session:
                 job = session.get(Outbox, outbox_id)
-                if exc.retry_after and not exc.uncertain:
+                if exc.status == 429 and exc.retry_after and not exc.uncertain and job.attempts < 5:
                     job.status = "pending"
-                    job.available_at = utcnow() + timedelta(seconds=min(int(exc.retry_after) + 1, 300))
+                    job.available_at = utcnow() + timedelta(seconds=max(1, int(exc.retry_after)) + 1)
                 else:
                     job.status = "uncertain" if exc.uncertain else "failed"
                 job.error_code = "telegram_" + str(exc.status or "transport")
