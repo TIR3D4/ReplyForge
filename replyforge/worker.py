@@ -47,6 +47,17 @@ def update_connection(session: Session, data: dict) -> BusinessConnection:
     return conn
 
 
+def worker_is_alive(session: Session, *, max_age_seconds: int = 65) -> bool:
+    flag = session.get(Control, "worker_heartbeat")
+    if not flag:
+        return False
+    try:
+        stamp = datetime.fromisoformat(flag.value)
+        return (utcnow() - _aware(stamp)).total_seconds() <= max_age_seconds
+    except (ValueError, TypeError):
+        return False
+
+
 def get_connection(session: Session, telegram: TelegramClient, connection_id: str) -> BusinessConnection:
     conn = session.get(BusinessConnection, connection_id)
     if conn is None:
@@ -500,9 +511,22 @@ class Processor:
             return True
         return False
 
+    def heartbeat(self) -> None:
+        with session_scope(self.factory) as session:
+            row = session.get(Control, "worker_heartbeat")
+            if row is None:
+                session.add(Control(key="worker_heartbeat", value=utcnow().isoformat()))
+            else:
+                row.value = utcnow().isoformat()
+                row.updated_at = utcnow()
+
     def run(self):
         log.info("ReplyForge worker started")
+        next_heartbeat = 0.0
         while True:
+            if time.monotonic() >= next_heartbeat:
+                self.heartbeat()
+                next_heartbeat = time.monotonic() + 15
             if not self.tick():
                 time.sleep(self.settings.poll_seconds)
 
