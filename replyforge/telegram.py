@@ -61,6 +61,11 @@ class TelegramClient:
             data["reply_markup"] = markup
         return self.call("sendMessage", data)
 
+    def send_admin(self, chat_id: int, text: str):
+        """Send from the bot (not the Business account) to an opt-in operator DM/group."""
+        return self.call("sendMessage", {"chat_id": chat_id, "text": text[:4000],
+                                         "link_preview_options": {"is_disabled": True}})
+
     def edit(self, connection_id: str, chat_id: int, message_id: int, text: str, markup=None):
         data = {
             "business_connection_id": connection_id, "chat_id": chat_id,

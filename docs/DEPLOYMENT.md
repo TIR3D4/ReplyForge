@@ -10,6 +10,7 @@
 - Confirm Telegram's Business / Secretary bot permission to read and reply and understand the recent-inbound reply window.
 - Configure offsite backups and test restoration before handling real customers.
 - Only one worker process/container for V1.
+- Optional SUPPORT_ALERT_CHAT_ID must point to a Telegram DM/group authorized to receive bot messages; the owner must first start the bot in private chat.
 
 ## Suggested reverse proxy (Caddy)
 

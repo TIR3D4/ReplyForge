@@ -23,6 +23,7 @@ class Settings:
     admin_password: str
     binding_pepper: str
     internal_api_key: str
+    support_alert_chat_id: int | None
     database_url: str
     business_config: str
     webhook_public_url: str
@@ -49,6 +50,7 @@ class Settings:
             admin_password=g("ADMIN_PASSWORD"),
             binding_pepper=g("BINDING_PEPPER"),
             internal_api_key=g("INTERNAL_API_KEY"),
+            support_alert_chat_id=int(g("SUPPORT_ALERT_CHAT_ID")) if g("SUPPORT_ALERT_CHAT_ID") else None,
             database_url=g("DATABASE_URL", "sqlite+pysqlite:///:memory:"),
             business_config=g("BUSINESS_CONFIG", "config/business.yaml"),
             webhook_public_url=g("WEBHOOK_PUBLIC_URL"),
@@ -79,6 +81,8 @@ class Settings:
             if min(len(obj.webhook_secret), len(obj.admin_password),
                    len(obj.binding_pepper), len(obj.internal_api_key)) < 16:
                 raise ConfigError("Secrets must be at least 16 characters")
+        if obj.support_alert_chat_id == 0:
+            raise ConfigError("SUPPORT_ALERT_CHAT_ID must be a non-zero Telegram chat ID")
         if obj.poll_seconds <= 0 or obj.lease_seconds < 20:
             raise ConfigError("Invalid worker intervals")
         if obj.webhook_path != "/telegram/webhook":

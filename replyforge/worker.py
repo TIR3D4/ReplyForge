@@ -169,6 +169,7 @@ class Processor:
                 proposal = apply_action(session, conv, self.playbook, self.ai, self.settings, action)
                 if conn.can_reply:
                     save_proposal(session, conv, proposal)
+                    self._queue_operator_alert(session, conv)
             return
 
         # Telegram echoes messages created by the connected bot: never recurse.
@@ -192,6 +193,23 @@ class Processor:
         text = message.get("text") or message.get("caption") or ""
         proposal = accept_input(session, conv, self.playbook, self.ai, self.settings, text, file_id)
         save_proposal(session, conv, proposal)
+        self._queue_operator_alert(session, conv)
+
+    def _queue_operator_alert(self, session: Session, conv: Conversation) -> None:
+        if not self.settings.support_alert_chat_id or conv.owner != "human_pending":
+            return
+        ticket = session.scalar(select(Ticket).where(
+            Ticket.conversation_id == conv.id, Ticket.status == "open",
+        ))
+        if ticket:
+            session.add(Outbox(
+                conversation_id=conv.id, revision=conv.revision,
+                kind="alert", text=f"🎧 ReplyForge ticket #{ticket.id}\n"
+                f"Customer chat: {conv.chat_id}\n"
+                f"Reason: {ticket.reason}\n"
+                f"Review in /admin/conversations/{conv.id}",
+                buttons=[],
+            ))
 
     def process_event(self, update_id: int) -> None:
         with session_scope(self.factory) as session:
@@ -210,9 +228,11 @@ class Processor:
                 return
             conv = session.get(Conversation, job.conversation_id)
             conn = session.get(BusinessConnection, conv.business_connection_id)
-            if (conv.revision != job.revision or not conn.enabled or not conn.can_reply
+            is_alert = job.kind == "alert"
+            if (conv.revision != job.revision or
+                    (not is_alert and (not conn.enabled or not conn.can_reply
                     or not conv.last_inbound_at or (utcnow() - _aware(conv.last_inbound_at)) >= REPLY_WINDOW
-                    or (conv.owner != "ai" and job.kind != "text")):
+                    or (conv.owner != "ai" and job.kind != "text")))):
                 job.status = "cancelled"
                 job.error_code = "obsolete_or_not_permitted"
                 return
@@ -225,7 +245,12 @@ class Processor:
 
         try:
             message_id = None
-            if kind == "menu" and menu_id:
+            if kind == "alert":
+                if self.settings.support_alert_chat_id is None:
+                    raise TelegramError("operator_alert_not_configured", status=400)
+                result = self.telegram.send_admin(self.settings.support_alert_chat_id, text)
+                message_id = result["message_id"]
+            elif kind == "menu" and menu_id:
                 try:
                     self.telegram.edit(connection_id, chat_id, menu_id, text, markup=markup)
                     message_id = menu_id
