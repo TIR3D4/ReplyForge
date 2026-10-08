@@ -47,6 +47,10 @@ button.ghost{background:transparent}form{display:grid;gap:10px}.badge{padding:4p
 <div class="card"><small>{{ _('Messages sent', 'پیام‌های ارسال‌شده') }}</small><strong>{{ sent_messages }}</strong></div>
 <div class="card"><small>{{ _('Pending delivery', 'در انتظار ارسال') }}</small><strong>{{ pending_messages }}</strong></div>
 </section>
+<section class="panel" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px">
+<div>✅ {{ _('Confirmed resolved', 'تأیید حل مشکل') }}: <strong>{{ positive_feedback }}</strong></div>
+<div>⚠️ {{ _('Not resolved', 'حل‌نشده و ارجاع‌شده') }}: <strong>{{ negative_feedback }}</strong></div>
+</section>
 <div class="layout">
 <div>
 <section class="panel" id="conversations">
