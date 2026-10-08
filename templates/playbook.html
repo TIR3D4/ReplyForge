@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}" dir="{{ 'rtl' if locale == 'fa' else 'ltr' }}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ReplyForge · Workflows</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif;background:#0b1120;color:#e7edff}
+*{box-sizing:border-box}body{max-width:1120px;padding:26px;margin:0 auto}
+a{color:#a6dfeb}h1{margin:14px 0 6px}p,small{color:#aebed4;line-height:1.6}
+.panel{background:#151f34;border:1px solid #31415e;padding:22px;border-radius:18px;margin:18px 0}
+textarea{font-family:ui-monospace,monospace;font-size:13px;line-height:1.5;
+border:1px solid #476077;background:#0b1525;color:#e8f1ff;width:100%;border-radius:12px;
+padding:16px;min-height:520px;resize:vertical;direction:ltr;text-align:left}
+button{background:#12727a;border:0;color:white;border-radius:9px;padding:11px 16px;
+cursor:pointer;font-weight:600}button.secondary{background:#33425d}
+table{width:100%;border-collapse:collapse}td,th{text-align:start;border-bottom:1px solid #2a3953;padding:12px}
+form.inline{display:inline} .pill{border-radius:14px;padding:5px 10px;background:#1c625b}
+@media(max-width:600px){body{padding:12px}.panel{padding:13px}textarea{min-height:450px}}
+</style></head>
+<body>
+<a href="/admin">{{ '← داشبورد' if locale == 'fa' else '← Dashboard' }}</a>
+<h1>{{ 'ویرایش هوشمند منو و گردش‌کار' if locale == 'fa' else 'Support workflow editor' }}</h1>
+<p>{{ brand }} · {{ 'نسخه فعال' if locale == 'fa' else 'Active version' }}:
+<span class="pill">{{ version if version else 'file default' }}</span></p>
+<div class="panel">
+<h2>{{ 'پیکربندی YAML' if locale == 'fa' else 'YAML configuration' }}</h2>
+<p>{{ 'قبل از ذخیره اعتبارسنجی می‌شود؛ اگر نسخه فعلی تغییر کند، فرایندهای ناتمام برای جلوگیری از ناسازگاری به منوی اصلی برمی‌گردند.' if locale == 'fa' else 'Validated before saving. Existing workflows from a changed version return to the home menu.' }}</p>
+<form method="post" action="/admin/playbook">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<textarea name="source" spellcheck="false" maxlength="50000" required>{{ source }}</textarea>
+<p><button>{{ 'ذخیره و فعال‌سازی نسخه جدید' if locale == 'fa' else 'Validate, save and activate' }}</button></p>
+</form>
+</div>
+<div class="panel">
+<h2>{{ 'تاریخچه نسخه‌ها و بازگردانی' if locale == 'fa' else 'Version history and rollback' }}</h2>
+<table><thead><tr><th>Version</th><th>Created</th><th>State</th><th></th></tr></thead><tbody>
+{% for v in revisions %}
+<tr><td>#{{ v.id }}</td><td>{{ v.created_at }}</td>
+<td>{{ '✅ Active' if v.active else 'Archived' }}</td><td>
+{% if not v.active %}<form class="inline" method="post" action="/admin/playbook/{{ v.id }}/activate">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button class="secondary">{{ 'بازگردانی' if locale == 'fa' else 'Restore' }}</button>
+</form>{% endif %}
+</td></tr>
+{% else %}<tr><td colspan="4">{{ 'هنوز نسخه‌ای ذخیره نشده؛ تنظیمات پیش‌فرض فایل فعال است.' if locale == 'fa' else 'The file default is active. No saved revisions.' }}</td></tr>{% endfor %}
+</tbody></table>
+</div>
+<p>Documentation: <a href="https://github.com/TIR3D4/ReplyForge/blob/main/docs/WORKFLOWS.md">Support workflow schema</a></p>
+</body></html>
