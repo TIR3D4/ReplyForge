@@ -164,6 +164,10 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 "sent_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status == "sent")),
                 "pending_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status.in_(("pending", "sending")))),
                 "auto_reply_enabled": auto_reply_enabled(session, request.app.state.settings),
+                "positive_feedback": session.scalar(select(func.count(Audit.id)).where(
+                    Audit.action == "feedback_positive")) or 0,
+                "negative_feedback": session.scalar(select(func.count(Audit.id)).where(
+                    Audit.action == "feedback_negative")) or 0,
             }
             current, revision = effective_playbook(session, request.app.state.playbook)
             return templates.TemplateResponse(request, "dashboard.html", {
