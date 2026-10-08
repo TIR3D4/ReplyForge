@@ -5,14 +5,14 @@ from dataclasses import dataclass, field
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .agent import AIEngine
 from .config import Settings
 from .integrations import ProviderError, describe, lookup
 from .models import Binding, Conversation, Knowledge, Ticket
-from .security import extract_link, fingerprint, redact
+from .security import extract_link, fingerprint, redact, subscription_token_fingerprint
 
 
 @dataclass
@@ -176,11 +176,19 @@ def accept_input(session: Session, conv: Conversation, playbook: dict, ai: AIEng
         url = extract_link(text)
         if not url:
             return _display_state(session, conv, playbook, ai, settings)
-        binding = session.scalar(select(Binding).where(
-            Binding.link_hmac == fingerprint(url, settings.binding_pepper),
-        ))
-        if binding is None or (binding.customer_chat_id is not None and binding.customer_chat_id != conv.chat_id):
+        digest = fingerprint(url, settings.binding_pepper)
+        token_digest = subscription_token_fingerprint(url, settings.binding_pepper)
+        clauses = [Binding.link_hmac == digest]
+        if token_digest is not None:
+            clauses.append(Binding.token_hmac == token_digest)
+        matches = session.scalars(select(Binding).where(or_(*clauses))).all()
+        matches = [entry for entry in matches if (
+            entry.customer_chat_id is None or entry.customer_chat_id == conv.chat_id
+        )]
+        # Ambiguous or unknown ownership is never resolved by guessing.
+        if len(matches) != 1:
             return human(session, conv, playbook, reason="subscription_unmatched")
+        binding = matches[0]
         try:
             status = lookup(settings, binding.provider, binding.user_ref)
         except ProviderError:
