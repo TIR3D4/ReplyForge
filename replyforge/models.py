@@ -122,6 +122,18 @@ class Knowledge(Base):
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+class KnowledgeSuggestion(Base):
+    """Draft FAQ distilled from a resolved ticket; human approval is required."""
+    __tablename__ = "knowledge_suggestions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(Integer, ForeignKey("tickets.id"), nullable=False)
+    question: Mapped[str] = mapped_column(String(500), nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Binding(Base):
     __tablename__ = "subscription_bindings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -147,6 +159,7 @@ Index("idx_tickets_status", Ticket.status, Ticket.created_at)
 Index("idx_tickets_sla", Ticket.status, Ticket.first_response_at, Ticket.sla_due_at)
 Index("idx_ticket_notes", TicketNote.ticket_id, TicketNote.created_at)
 Index("idx_drafts_conversation", OperatorDraft.conversation_id, OperatorDraft.status)
+Index("idx_knowledge_review", KnowledgeSuggestion.status, KnowledgeSuggestion.created_at)
 
 
 class PlaybookVersion(Base):
