@@ -328,6 +328,13 @@ class Processor:
 
     def _queue_human_followup(self, session: Session, conv: Conversation, message: dict) -> None:
         """Notify an already-assigned human if new evidence arrived."""
+        ticket = session.scalar(select(Ticket).where(
+            Ticket.conversation_id == conv.id,
+            Ticket.status.in_(("open", "in_progress")),
+        ).order_by(Ticket.id.desc()).limit(1))
+        if ticket is not None:
+            ticket.last_customer_at = utcnow()
+            ticket.updated_at = utcnow()
         if not self.settings.support_alert_chat_id:
             return
         photo = message.get("photo") or []
@@ -363,14 +370,15 @@ class Processor:
         if not self.settings.support_alert_chat_id or conv.owner != "human_pending":
             return
         ticket = session.scalar(select(Ticket).where(
-            Ticket.conversation_id == conv.id, Ticket.status == "open",
+            Ticket.conversation_id == conv.id,
+            Ticket.status.in_(("open", "in_progress")),
         ))
         if ticket:
             session.add(Outbox(
                 conversation_id=conv.id, revision=conv.revision,
                 kind="alert", text=f"🎧 ReplyForge ticket #{ticket.id}\n"
                 f"Customer chat: {conv.chat_id}\n"
-                f"Reason: {ticket.reason}\n"
+                f"Reason: {ticket.reason} | Priority: {ticket.priority}\n"
                 f"Review in /admin/conversations/{conv.id}",
                 buttons=[],
             ))
@@ -559,6 +567,41 @@ class Processor:
                 session.add(Message(conversation_id=conv.id, telegram_message_id=None,
                                     direction="out", kind=kind, content=redact(text)))
 
+    def check_sla(self) -> bool:
+        """Escalate overdue, unanswered tickets at most once."""
+        with session_scope(self.factory) as session:
+            now = utcnow()
+            ticket = session.scalar(select(Ticket).where(
+                Ticket.status.in_(("open", "in_progress")),
+                Ticket.first_response_at.is_(None),
+                Ticket.escalated_at.is_(None),
+                Ticket.sla_due_at.is_not(None),
+                Ticket.sla_due_at <= now,
+            ).order_by(Ticket.sla_due_at, Ticket.id).limit(1).with_for_update(
+                skip_locked=True,
+            ))
+            if ticket is None:
+                return False
+            ticket.escalated_at = now
+            ticket.priority = "urgent"
+            ticket.updated_at = now
+            session.add(Audit(
+                conversation_id=ticket.conversation_id, actor="system",
+                action="ticket_sla_escalation", detail=str(ticket.id),
+            ))
+            if self.settings.support_alert_chat_id:
+                conv = session.get(Conversation, ticket.conversation_id)
+                session.add(Outbox(
+                    conversation_id=ticket.conversation_id,
+                    revision=conv.revision,
+                    kind="alert",
+                    text=f"🚨 Support SLA breached: ticket #{ticket.id} "
+                         f"(chat {conv.chat_id}, reason {ticket.reason}). "
+                         f"Review /admin/conversations/{conv.id}",
+                    buttons=[],
+                ))
+            return True
+
     def tick(self) -> bool:
         with session_scope(self.factory) as session:
             ev = claim(session, Event, self.settings.lease_seconds)
@@ -585,7 +628,7 @@ class Processor:
         if outbox_id is not None:
             self.delivery(outbox_id)
             return True
-        return False
+        return self.check_sla()
 
     def heartbeat(self) -> None:
         with session_scope(self.factory) as session:

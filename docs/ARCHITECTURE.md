@@ -64,3 +64,8 @@ The model selects only predefined menu actions or options. It cannot execute SQL
 - Rule-based slot extraction prevents redundant device/application questions.
 
 The LLM remains a bounded classifier and approved-FAQ selector; it is **not** given arbitrary terminal, database or network tools. A privacy-controlled learning pipeline and end-to-end production integrations need additional review before full autonomy.
+
+
+## Support operations (V1.1)
+
+Every escalation creates a ticket with a configurable first-response SLA (default 60 minutes), priority, category and optional assignment. A single worker escalates unanswered tickets once, records an audit event and can notify the operator chat. Internal notes are never delivered to customers. Ticket closure does not automatically reactivate AI; an operator must explicitly resume it.
