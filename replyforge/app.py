@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
-from sqlalchemy import case, desc, func, or_, select, text
+from sqlalchemy import case, delete, desc, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 
 from .config import ConfigError, Settings, load_playbook
@@ -632,6 +632,75 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             session.add(Audit(conversation_id=conv.id, actor="operator",
                               action="operator_reply_queued"))
         return RedirectResponse(f"/admin/conversations/{conversation_id}", status_code=303)
+
+
+    @app.post("/admin/conversations/{conversation_id}/erase")
+    def erase_conversation_data(
+        request: Request, conversation_id: int,
+        confirmation: str = Form(...), csrf_token: str = Form(...),
+        _=Depends(authenticate),
+    ):
+        """Irreversible, admin-confirmed local deletion of a support conversation."""
+        csrf(request, csrf_token)
+        with session_scope(request.app.state.factory) as session:
+            conv = session.scalar(select(Conversation).where(
+                Conversation.id == conversation_id).with_for_update())
+            if conv is None:
+                raise HTTPException(404, detail="Conversation not found")
+            if confirmation != "ERASE " + str(conv.chat_id):
+                raise HTTPException(422, detail="Type ERASE followed by the chat ID")
+            inflight = session.scalar(select(Outbox.id).where(
+                Outbox.conversation_id == conv.id,
+                Outbox.status.in_(("sending", "uncertain")),
+            ).limit(1))
+            if inflight is not None:
+                raise HTTPException(409, detail="Reconcile in-flight or uncertain sends first")
+
+            # Scrub queued updates so the worker cannot recreate this old chat
+            # from an update received before the erasure transaction.
+            pending_events = session.scalars(select(Event).where(
+                Event.status.in_(("pending", "processing")),
+            ).with_for_update()).all()
+            matching = []
+            for event in pending_events:
+                payload = event.payload or {}
+                msg = (payload.get("business_message")
+                       or payload.get("edited_business_message")
+                       or payload.get("callback_query", {}).get("message")
+                       or payload.get("deleted_business_messages")
+                       or {})
+                if (msg.get("business_connection_id") == conv.business_connection_id
+                        and (msg.get("chat") or {}).get("id") == conv.chat_id):
+                    if event.status == "processing":
+                        raise HTTPException(409, detail="A matching inbound update is processing")
+                    matching.append(event)
+            for event in matching:
+                event.status = "done"
+                event.payload = {}
+                event.claimed_until = None
+
+            ticket_ids = session.scalars(select(Ticket.id).where(
+                Ticket.conversation_id == conv.id,
+            )).all()
+            if ticket_ids:
+                session.execute(delete(TicketNote).where(
+                    TicketNote.ticket_id.in_(ticket_ids)))
+                session.execute(delete(KnowledgeSuggestion).where(
+                    KnowledgeSuggestion.ticket_id.in_(ticket_ids)))
+            session.execute(delete(OperatorDraft).where(
+                OperatorDraft.conversation_id == conv.id))
+            session.execute(delete(Outbox).where(Outbox.conversation_id == conv.id))
+            session.execute(delete(Message).where(Message.conversation_id == conv.id))
+            session.execute(delete(Audit).where(Audit.conversation_id == conv.id))
+            session.execute(delete(Ticket).where(Ticket.conversation_id == conv.id))
+            session.execute(delete(Binding).where(
+                Binding.customer_chat_id == conv.chat_id))
+            session.execute(delete(Conversation).where(Conversation.id == conv.id))
+            session.add(Audit(
+                actor="operator", action="privacy_erasure",
+                detail="local customer data erased (no identifier retained)",
+            ))
+        return RedirectResponse("/admin", status_code=303)
 
     @app.post("/admin/conversations/{conversation_id}/takeover")
     def takeover(request: Request, conversation_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
