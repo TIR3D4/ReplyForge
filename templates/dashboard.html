@@ -32,6 +32,15 @@ button.ghost{background:transparent}form{display:grid;gap:10px}.badge{padding:4p
 <div><small>{{ _('REPLYFORGE / OPERATOR CONSOLE', 'REPLYFORGE / داشبورد اپراتور') }}</small><h1>{{ brand }}</h1><small>Telegram Business · self-hosted support</small></div>
 <div><mark>{{ _('● ONLINE', '● آنلاین') }}</mark> <a class="anchor" href="/healthz">{{ _('Health', 'سلامت') }}</a></div>
 </header>
+<section class="panel" style="border-color:{{ '#168b7e' if auto_reply_enabled else '#b87b32' }}">
+<div class="row" style="gap:20px;flex-wrap:wrap">
+<div><strong>{{ _('AI responses enabled', 'پاسخگویی خودکار فعال است') if auto_reply_enabled else _('Monitor-only mode', 'حالت مشاهده: پاسخگویی خودکار خاموش') }}</strong>
+<p class="muted">{{ _('Pause replies anytime', 'هر زمان می‌توانید پاسخگویی را متوقف کنید') }}</p></div>
+<form method="post" action="/admin/automation" style="display:flex;flex-direction:row;align-items:center">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<input type="hidden" name="enabled" value="{{ 'false' if auto_reply_enabled else 'true' }}">
+<button type="submit">{{ _('Pause AI now', 'توقف فوری پاسخگویی') if auto_reply_enabled else _('Enable AI replies', 'فعال‌کردن پاسخگویی') }}</button></form>
+</div></section>
 <section class="cards">
 <div class="card"><small>{{ _('Conversations', 'گفتگوها') }}</small><strong>{{ total_conversations }}</strong></div>
 <div class="card"><small>{{ _('Open human tickets', 'تیکت‌های باز انسانی') }}</small><strong>{{ open_tickets }}</strong></div>
