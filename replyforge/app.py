@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import hashlib
 import hmac
+from pathlib import Path
 
 from fastapi import (
     Body, Depends, FastAPI, Form, Header, HTTPException, Request
@@ -15,12 +16,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.exc import IntegrityError
 
-from .config import Settings, load_playbook
+from .config import ConfigError, Settings, load_playbook
 from .database import session_factory, session_scope
 from .models import (
     Audit, Binding, Conversation, Event, Knowledge, Message, Outbox, Ticket, utcnow
 )
 from .security import constant_time_equal, fingerprint
+from .playbooks import active_version, activate_version, effective_playbook, save_playbook
+from .models import PlaybookVersion
 from .telegram import TelegramClient
 
 basic = HTTPBasic()
@@ -155,11 +158,13 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 "sent_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status == "sent")),
                 "pending_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status.in_(("pending", "sending")))),
             }
+            current, revision = effective_playbook(session, request.app.state.playbook)
             return templates.TemplateResponse(request, "dashboard.html", {
-                **data, "brand": request.app.state.playbook["brand"],
-                "locale": request.app.state.playbook.get("locale", "en"),
+                **data, "brand": current["brand"],
+                "locale": current.get("locale", "en"),
+                "playbook_version": revision,
                 "csrf": csrf_value(request),
-                "_": lambda en, fa: fa if request.app.state.playbook.get("locale") == "fa" else en,
+                "_": lambda en, fa: fa if current.get("locale") == "fa" else en,
             })
 
     @app.get("/admin/conversations/{conversation_id}", response_class=HTMLResponse)
@@ -171,12 +176,53 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             messages = session.scalars(select(Message).where(
                 Message.conversation_id == conversation_id,
             ).order_by(Message.id.desc()).limit(100)).all()
+            current, _version = effective_playbook(session, request.app.state.playbook)
             return templates.TemplateResponse(request, "conversation.html", {
                 "conv": conv, "messages": list(reversed(messages)),
                 "csrf": csrf_value(request),
-                "locale": request.app.state.playbook.get("locale", "en"),
-                "_": lambda en, fa: fa if request.app.state.playbook.get("locale") == "fa" else en,
+                "locale": current.get("locale", "en"),
+                "_": lambda en, fa: fa if current.get("locale") == "fa" else en,
             })
+
+
+    @app.get("/admin/playbook", response_class=HTMLResponse)
+    def playbook_editor(request: Request, _=Depends(authenticate)):
+        with session_scope(request.app.state.factory) as session:
+            live = active_version(session)
+            source = live.source if live else Path(
+                request.app.state.settings.business_config,
+            ).read_text(encoding="utf-8")
+            current, version = effective_playbook(session, request.app.state.playbook)
+            revisions = session.scalars(select(PlaybookVersion).order_by(
+                desc(PlaybookVersion.id),
+            ).limit(25)).all()
+            return templates.TemplateResponse(request, "playbook.html", {
+                "source": source, "brand": current["brand"],
+                "version": version, "revisions": revisions,
+                "csrf": csrf_value(request), "locale": current.get("locale", "en"),
+            })
+
+    @app.post("/admin/playbook")
+    def update_playbook(request: Request, source: str = Form(...), csrf_token: str = Form(...),
+                        _=Depends(authenticate)):
+        csrf(request, csrf_token)
+        try:
+            with session_scope(request.app.state.factory) as session:
+                entry = save_playbook(session, source)
+                session.add(Audit(actor="admin", action="playbook_update", detail=str(entry.id)))
+        except (ConfigError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return RedirectResponse("/admin/playbook", status_code=303)
+
+    @app.post("/admin/playbook/{version_id}/activate")
+    def restore_playbook(request: Request, version_id: int, csrf_token: str = Form(...),
+                         _=Depends(authenticate)):
+        csrf(request, csrf_token)
+        with session_scope(request.app.state.factory) as session:
+            if not activate_version(session, version_id):
+                raise HTTPException(status_code=404, detail="Unknown version")
+            session.add(Audit(actor="admin", action="playbook_restore", detail=str(version_id)))
+        return RedirectResponse("/admin/playbook", status_code=303)
 
     @app.post("/admin/conversations/{conversation_id}/takeover")
     def takeover(request: Request, conversation_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
