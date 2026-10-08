@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}" dir="{{ 'rtl' if locale == 'fa' else 'ltr' }}">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ReplyForge · {{ brand }}</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#0b1120;color:#e7edff;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;padding:24px;max-width:1500px;margin-inline:auto;line-height:1.5}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:26px}
+h1{font-size:27px;margin:0}h2{font-size:17px;margin:0 0 16px}
+small, .muted{color:#94a3b8}a{color:#9ddaf8}a:hover{color:#fff}
+mark{background:#173b49;color:#8cead4;padding:4px 10px;border-radius:20px}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:20px}
+.card,.panel{background:#141e32;border:1px solid #29364d;border-radius:16px;padding:20px}
+.card strong{display:block;font-size:29px;margin-top:8px}.card small{font-size:12px}
+.layout{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start}
+.panel{margin-bottom:16px;overflow:hidden} .panel:target{border-color:#43868e}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{text-align:start;padding:11px 8px;border-bottom:1px solid #29364d;vertical-align:top}th{color:#9daec6;font-weight:500}
+input,textarea,select,button{border:1px solid #37445e;border-radius:10px;padding:11px 12px;background:#0d1526;color:#e7edff;font:inherit}
+input,textarea{width:100%}textarea{min-height:100px;resize:vertical}
+button{background:#166c71;border-color:#258b92;font-weight:600;cursor:pointer}button:hover{background:#1e8186}
+button.ghost{background:transparent}form{display:grid;gap:10px}.badge{padding:4px 7px;border-radius:6px;background:#243249;font-size:12px}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between}.stack{display:grid;gap:12px}
+.anchor{font-size:12px;text-decoration:none;color:#9bcae5}
+@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.layout{grid-template-columns:1fr}}
+@media(max-width:480px){body{padding:12px}.cards{gap:8px}.card,.panel{padding:13px}h1{font-size:22px}}
+</style>
+</head>
+<body>
+<header>
+<div><small>REPLYFORGE / OPERATOR CONSOLE</small><h1>{{ brand }}</h1><small>Telegram Business · self-hosted support</small></div>
+<div><mark>● ONLINE</mark> <a class="anchor" href="/healthz">Health</a></div>
+</header>
+<section class="cards">
+<div class="card"><small>Conversations</small><strong>{{ total_conversations }}</strong></div>
+<div class="card"><small>Open human tickets</small><strong>{{ open_tickets }}</strong></div>
+<div class="card"><small>Messages sent</small><strong>{{ sent_messages }}</strong></div>
+<div class="card"><small>Pending delivery</small><strong>{{ pending_messages }}</strong></div>
+</section>
+<div class="layout">
+<div>
+<section class="panel" id="conversations">
+<div class="row"><h2>💬 Conversations</h2><span class="muted">Recent 40</span></div>
+<table><thead><tr><th>Chat</th><th>Owner</th><th>Workflow</th><th>Open</th></tr></thead>
+<tbody>{% for c in conversations %}<tr>
+<td>{{ c.chat_id }}</td><td><span class="badge">{{ c.owner }}</span></td>
+<td>{{ c.workflow or '—' }}</td><td><a href="/admin/conversations/{{ c.id }}">Inspect →</a></td>
+</tr>{% else %}<tr><td colspan="4" class="muted">No conversations yet.</td></tr>{% endfor %}</tbody></table>
+</section>
+<section class="panel" id="tickets">
+<div class="row"><h2>🎧 Human support queue</h2><span class="muted">Recent 40</span></div>
+<table><thead><tr><th>ID</th><th>Reason</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+{% for t in tickets %}<tr><td>#{{ t.id }}</td><td>{{ t.reason }}</td><td>{{ t.status }}</td>
+<td><a href="/admin/conversations/{{ t.conversation_id }}">View</a>
+{% if t.status == 'open' %}<form method="post" action="/admin/tickets/{{ t.id }}/close">
+<input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="ghost">Close</button></form>{% endif %}</td>
+</tr>{% else %}<tr><td colspan="4">No tickets.</td></tr>{% endfor %}</tbody></table>
+</section>
+<section class="panel" id="uncertain"><h2>⚠️ Delivery requiring manual review</h2>
+<table><tbody>{% for d in uncertain %}<tr><td>Outbox #{{ d.id }}</td><td>Conversation {{ d.conversation_id }}</td><td>{{ d.error_code or 'unknown' }}</td>
+</tr>{% else %}<tr><td class="muted">No uncertain sends.</td></tr>{% endfor %}</tbody></table>
+</section>
+</div>
+<div>
+<section class="panel" id="knowledge">
+<h2>📚 Approved knowledge</h2>
+<form method="post" action="/admin/knowledge">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<label>Customer question<input name="question" maxlength="500" placeholder="How do I update a subscription?" required></label>
+<label>Approved answer<textarea name="answer" maxlength="4000" required></textarea></label>
+<button type="submit">Add knowledge entry</button></form>
+<div class="stack" style="margin-top:20px">
+{% for item in knowledge %}<div class="card" style="padding:12px">
+<div><strong>{{ item.question }}</strong></div><small>{{ item.answer[:200] }}</small>
+<form method="post" action="/admin/knowledge/{{ item.id }}/delete"><input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button class="ghost">Delete</button></form></div>{% endfor %}
+</div>
+</section>
+<section class="panel" id="bindings"><h2>🔐 Subscription associations</h2>
+<p class="muted">Only an HMAC fingerprint of the link is stored. No raw tokens.</p>
+<form method="post" action="/admin/bindings">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<input type="url" name="link" placeholder="Subscription URL" required>
+<select name="provider"><option value="marzban">Marzban</option><option value="pasarguard">Pasarguard</option></select>
+<input name="user_ref" placeholder="Panel username or numeric user ID" maxlength="255" required>
+<input name="label" placeholder="Internal label (optional)" maxlength="255">
+<button type="submit">Associate subscription</button></form>
+<table><thead><tr><th>Provider</th><th>Reference</th></tr></thead><tbody>
+{% for b in bindings %}<tr><td>{{ b.provider }}</td><td>{{ b.label or b.user_ref }}</td></tr>{% else %}
+<tr><td colspan="2" class="muted">No linked subscriptions.</td></tr>{% endfor %}</tbody></table>
+</section>
+</div>
+</div>
+<footer class="muted" style="padding:25px 0;text-align:center">ReplyForge · Open source · Human-first automation</footer>
+</body></html>
