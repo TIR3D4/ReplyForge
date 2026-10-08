@@ -292,8 +292,9 @@ class Processor:
             job.claimed_until = None
             if kind == "menu" and conv.revision == job.revision:
                 conv.menu_message_id = message_id
-            session.add(Message(conversation_id=conv.id, telegram_message_id=None,
-                                direction="out", kind=kind, content=redact(text)))
+            if kind != "alert":
+                session.add(Message(conversation_id=conv.id, telegram_message_id=None,
+                                    direction="out", kind=kind, content=redact(text)))
 
     def tick(self) -> bool:
         with session_scope(self.factory) as session:

@@ -33,10 +33,15 @@ class FakeTelegram:
         self.sent = []
         self.edited = []
         self.acks = []
+        self.admin_alerts = []
 
     def send(self, connection_id, chat_id, text, markup=None):
         self.sent.append((connection_id, chat_id, text, markup))
         return {"message_id": 100 + len(self.sent)}
+
+    def send_admin(self, chat_id, text):
+        self.admin_alerts.append((chat_id, text))
+        return {"message_id": 300 + len(self.admin_alerts)}
 
     def edit(self, connection_id, chat_id, message_id, text, markup=None):
         self.edited.append((connection_id, chat_id, message_id, text, markup))

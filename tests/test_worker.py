@@ -95,3 +95,22 @@ def test_uncertain_send_is_not_automatically_retried(database, test_settings, fa
     with session_scope(database) as db:
         assert db.scalar(select(Outbox)).status == "uncertain"
     assert not p.tick()
+
+
+def test_human_escalation_creates_operator_alert(database, test_settings, fake_telegram):
+    from dataclasses import replace
+    settings = replace(test_settings, support_alert_chat_id=555001)
+    seed(database)
+    p = Processor(settings, database, fake_telegram)
+    with session_scope(database) as db:
+        db.add(Event(update_id=5, payload=incoming(5, "میخوام با اپراتور انسانی حرف بزنم"), status="processing"))
+    p.process_event(5)
+    assert p.tick()  # customer-facing handoff message
+    assert p.tick()  # operator alert
+    assert len(fake_telegram.admin_alerts) == 1
+    assert fake_telegram.admin_alerts[0][0] == 555001
+    assert "ticket" in fake_telegram.admin_alerts[0][1].lower()
+    with session_scope(database) as db:
+        assert db.scalar(select(Conversation)).owner == "human_pending"
+        outbound = db.scalars(select(Message).where(Message.direction == "out")).all()
+        assert len(outbound) == 1  # alert must not appear in customer history

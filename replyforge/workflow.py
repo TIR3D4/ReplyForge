@@ -159,7 +159,7 @@ def accept_input(session: Session, conv: Conversation, playbook: dict, ai: AIEng
     state = flow["states"][conv.step]
     kind = state.get("input")
     if kind == "choice":
-        value = ai.select_choice(text, state.get("options", []))
+        value = ai.select_choice(redact(text), state.get("options", []))
         if value is None:
             return Proposal(
                 "یکی از گزینه‌ها رو انتخاب کن یا توضیح بیشتری بده." if is_fa(playbook)

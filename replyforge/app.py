@@ -4,10 +4,9 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import hashlib
 import hmac
-import os
 
 from fastapi import (
-    Body, Depends, FastAPI, Form, Header, HTTPException, Request, status
+    Body, Depends, FastAPI, Form, Header, HTTPException, Request
 )
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials

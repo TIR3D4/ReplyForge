@@ -1,7 +1,6 @@
 """Bounded AI helpers: a model selects from approved routes, never executes code."""
 from __future__ import annotations
 
-import json
 import logging
 import re
 
