@@ -37,3 +37,22 @@ jobs:
         env:
           TEST_POSTGRES_URL: postgresql+psycopg://replyforge:ci-only-password@localhost:5432/replyforge_test
         run: pytest -q tests/test_postgres.py
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production container
+        run: docker build --tag replyforge-ci .
+      - name: Verify playbook is present
+        run: docker run --rm replyforge-ci replyforge check-config
+      - name: Exercise migration in container
+        run: |
+          docker run --rm \
+            -e BOT_TOKEN="123:ci-test" \
+            -e WEBHOOK_SECRET="01234567890123456789012345678900" \
+            -e ADMIN_PASSWORD="01234567890123456789" \
+            -e BINDING_PEPPER="01234567890123456789012345678900" \
+            -e INTERNAL_API_KEY="01234567890123456789012345678900" \
+            -e DATABASE_URL="sqlite+pysqlite:////tmp/replyforge-ci.db" \
+            replyforge-ci replyforge init
