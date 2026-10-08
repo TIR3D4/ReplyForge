@@ -23,3 +23,16 @@ V1 records workflow history and support tickets until an operator deletes/archiv
 ## Limitations
 
 The system is not a payment processor, anti-fraud engine or secret vault. It has not undergone an independent security audit. Regular dependency updates, backup restoration drills and live integration tests remain required.
+
+
+## Media processing changes
+
+Media analysis is disabled by default. When a deployer opts into screenshot reading and/or voice transcription, selected media is fetched from Telegram's fixed file endpoint with a configured size bound and may be sent to the configured AI provider. The engine treats image text as untrusted and does not validate payment or financial claims from a screenshot. Operators must disclose this processing and protect logs and backups.
+
+## Subscription catalog matching
+
+Trusted Marzban/Pasarguard admin APIs may be used to list existing users. Only HMAC fingerprints of their long bearer tokens are stored; relay URL normalization does not make the bearer token public. An unknown, short or ambiguous token is not a verified subscription. The system never fetches a URL supplied by a customer.
+
+## Staged activation and operator control
+
+New installs default to monitor-only mode. The authenticated admin can pause automated customer replies immediately while leaving human replies available. Database worker heartbeats enable alerting when background processing fails. The Telegram Business reply time window is still enforced.
