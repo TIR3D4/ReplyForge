@@ -108,3 +108,26 @@ def test_postgres_rejects_second_worker():
     with exclusive_worker(engine):
         pass  # A clean exit releases the advisory lock.
     engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv('TEST_POSTGRES_URL'), reason='No PostgreSQL configured')
+def test_postgres_retention_scrubs_json_workflow_state():
+    from datetime import timedelta
+    import uuid
+    from replyforge.models import utcnow
+    from replyforge.privacy import prune_history
+    engine, factory = session_factory(os.environ['TEST_POSTGRES_URL'])
+    key = 'privacy-' + uuid.uuid4().hex
+    with session_scope(factory) as db:
+        db.add(BusinessConnection(id=key, enabled=True, can_reply=True))
+        db.flush()
+        conv = Conversation(business_connection_id=key, chat_id=42,
+            last_inbound_at=utcnow()-timedelta(days=200), state={'answers': {'private': 'example'}})
+        db.add(conv)
+        db.flush()
+        cid = conv.id
+    with session_scope(factory) as db:
+        assert prune_history(db, 180)['conversation_state'] >= 1
+    with session_scope(factory) as db:
+        assert db.get(Conversation, cid).state == {}
+    engine.dispose()

@@ -72,6 +72,22 @@ class ProviderError(Exception):
     pass
 
 
+def verify_version(client, headers: dict, expected: str, provider: str) -> None:
+    """Optional exact-version gate. Never infer protocol compatibility from branding.
+
+    PasarGuard requires system.read in addition to users.read for this opt-in
+    probe. Keep the default users.read-only path available to least-privilege keys.
+    """
+    if not expected:
+        return
+    response = client.get("api/system", headers=headers)
+    response.raise_for_status()
+    data = response.json()
+    actual = data.get("version") if isinstance(data, dict) else None
+    if not isinstance(actual, str) or actual.removeprefix("v") != expected.removeprefix("v"):
+        raise ProviderError(provider + "_version_mismatch")
+
+
 class MarzbanAdapter:
     def __init__(self, settings: Settings, *, transport=None):
         self.s = settings
@@ -91,9 +107,9 @@ class MarzbanAdapter:
                 })
                 auth.raise_for_status()
                 token = auth.json()["access_token"]
-                result = client.get("api/user/" + quote(user_ref, safe=""), headers={
-                    "Authorization": "Bearer " + token,
-                })
+                headers = {"Authorization": "Bearer " + token}
+                verify_version(client, headers, self.s.marzban_expected_version, "marzban")
+                result = client.get("api/user/" + quote(user_ref, safe=""), headers=headers)
                 result.raise_for_status()
                 return normalize("marzban", result.json())
         except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
@@ -114,9 +130,9 @@ class PasarguardAdapter:
         try:
             with httpx.Client(base_url=self.s.pasarguard_base_url.rstrip("/") + "/", timeout=8,
                               transport=self.transport, follow_redirects=False) as client:
-                r = client.get("api/user/by-id/" + quote(user_ref, safe=""), headers={
-                    "X-Api-Key": self.s.pasarguard_api_key,
-                })
+                headers = {"X-Api-Key": self.s.pasarguard_api_key}
+                verify_version(client, headers, self.s.pasarguard_expected_version, "pasarguard")
+                r = client.get("api/user/by-id/" + quote(user_ref, safe=""), headers=headers)
                 r.raise_for_status()
                 return normalize("pasarguard", r.json())
         except (httpx.HTTPError, ValueError, TypeError) as exc:

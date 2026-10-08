@@ -51,6 +51,8 @@ class Settings:
     allow_http_panels: bool
     ai_fallback_model: str = ""
     ai_max_output_tokens: int = 250
+    marzban_expected_version: str = ""
+    pasarguard_expected_version: str = ""
 
     @classmethod
     def from_env(cls, *, strict: bool = True) -> "Settings":
@@ -85,6 +87,8 @@ class Settings:
             ai_fallback_model=g("AI_FALLBACK_MODEL"),
             ai_max_output_tokens=int(g("AI_MAX_OUTPUT_TOKENS", "250")),
             marzban_base_url=g("MARZBAN_BASE_URL"),
+            marzban_expected_version=g("MARZBAN_EXPECTED_VERSION"),
+            pasarguard_expected_version=g("PASARGUARD_EXPECTED_VERSION"),
             marzban_username=g("MARZBAN_USERNAME"),
             marzban_password=g("MARZBAN_PASSWORD"),
             pasarguard_base_url=g("PASARGUARD_BASE_URL"),
@@ -105,6 +109,9 @@ class Settings:
             if min(len(obj.webhook_secret), len(obj.admin_password),
                    len(obj.binding_pepper), len(obj.internal_api_key)) < 16:
                 raise ConfigError("Secrets must be at least 16 characters")
+        for version in (obj.marzban_expected_version, obj.pasarguard_expected_version):
+            if version and not re.fullmatch(r"v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", version):
+                raise ConfigError("Panel expected version must be an exact semantic version")
         if not 32 <= obj.ai_max_output_tokens <= 2000:
             raise ConfigError("AI_MAX_OUTPUT_TOKENS must be 32–2000")
         if obj.support_alert_chat_id == 0:
