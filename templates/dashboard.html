@@ -41,6 +41,10 @@ button.ghost{background:transparent}form{display:grid;gap:10px}.badge{padding:4p
 <input type="hidden" name="enabled" value="{{ 'false' if auto_reply_enabled else 'true' }}">
 <button type="submit">{{ _('Pause AI now', 'توقف فوری پاسخگویی') if auto_reply_enabled else _('Enable AI replies', 'فعال‌کردن پاسخگویی') }}</button></form>
 </div></section>
+<section class="panel" style="display:flex;gap:20px;align-items:center;justify-content:space-between;flex-wrap:wrap">
+<div><strong>{{ _('Support worker online', 'پردازشگر پشتیبانی آنلاین است') if worker_alive else _('Support worker offline', 'پردازشگر پشتیبانی آفلاین است') }}</strong>
+<p class="muted" style="margin:4px 0">{{ _('Dead updates', 'رویدادهای ناموفق نهایی') }}: {{ dead_updates }} · <a href="/readyz">{{ _('Readiness details', 'جزئیات سلامت') }}</a></p></div>
+</section>
 <section class="cards">
 <div class="card"><small>{{ _('Conversations', 'گفتگوها') }}</small><strong>{{ total_conversations }}</strong></div>
 <div class="card"><small>{{ _('Open human tickets', 'تیکت‌های باز انسانی') }}</small><strong>{{ open_tickets }}</strong></div>
