@@ -92,6 +92,17 @@ button.secondary{background:#38455d}form{display:inline}
 {% for job in outbound %}<p>#{{ job.id }} — {{ job.status }} {% if job.error_code %}({{ job.error_code }}){% endif %}</p>{% endfor %}
 {% endif %}
 </section>
+<section class="card" style="border-color:#8b444f">
+<h2>🗑️ {{ _('Erase local customer data', 'حذف اطلاعات مشتری از ReplyForge') }}</h2>
+<p>{{ _('This permanently deletes local chat history, notes, drafts, tickets and local associations. It does not delete Telegram chats, VPN panel users or backups.', 'این عملیات تاریخچه، تیکت‌ها، یادداشت‌ها، پیش‌نویس‌ها و ارتباطات داخلی مشتری را برای همیشه از پایگاه داده حذف می‌کند. پیام‌های تلگرام، پنل VPN و نسخه‌های پشتیبان حذف نمی‌شوند.') }}</p>
+<form class="ticket-form" method="post" action="/admin/conversations/{{ conv.id }}/erase"
+onsubmit="return confirm('Permanently erase the local customer record?');">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<label>{{ _('Type exactly:', 'دقیقاً عبارت زیر را وارد کنید:') }} <code>ERASE {{ conv.chat_id }}</code>
+<input name="confirmation" autocomplete="off" maxlength="40" placeholder="ERASE {{ conv.chat_id }}" required></label>
+<button type="submit" class="secondary">{{ _('Erase local record permanently', 'حذف دائمی اطلاعات داخلی') }}</button>
+</form>
+</section>
 <h2>{{ _('Message history (most recent 100)', 'تاریخچه پیام‌ها (۱۰۰ مورد آخر)') }}</h2>
 <div class="messages">{% for m in messages %}
 <div class="msg {{ 'out' if m.direction == 'out' else 'in' }}">
