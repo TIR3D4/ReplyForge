@@ -103,3 +103,29 @@ def test_voice_without_consent_requests_text_and_not_human_secret(database, test
     with session_scope(database) as db:
         assert db.scalar(select(Conversation)).owner == "ai"
         assert db.scalar(select(Ticket)) is None
+
+
+def test_payment_adjacent_receipt_never_calls_vision(database, test_settings, fake_telegram, monkeypatch):
+    from dataclasses import replace
+    settings = replace(test_settings, vision_enabled=True, ai_api_key="fake-key")
+    called = []
+    monkeypatch.setattr(AIEngine, "describe_screenshot",
+                        lambda self, content: called.append(content) or "not allowed")
+    with session_scope(database) as db:
+        db.add(BusinessConnection(id="bc", owner_user_id=900, enabled=True, can_reply=True))
+        db.flush()
+        c = Conversation(business_connection_id="bc", chat_id=100,
+                         owner="ai", workflow="delivery", step="order",
+                         state={"answers": {}})
+        db.add(c)
+        db.add(Event(update_id=785, status="processing", payload={
+            "update_id": 785,
+            "business_message": {
+                "business_connection_id": "bc", "chat": {"id": 100},
+                "message_id": 785, "from": {"id": 100},
+                "photo": [{"file_id": "bank-receipt"}],
+            },
+        }))
+    fake_telegram.files["bank-receipt"] = bytes.fromhex("ffd8ff") + b"example"
+    Processor(settings, database, fake_telegram).process_event(785)
+    assert called == []
