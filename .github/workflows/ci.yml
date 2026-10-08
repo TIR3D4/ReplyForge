@@ -42,6 +42,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate deployment topology
+        run: |
+          cp .env.example .env
+          POSTGRES_PASSWORD=ci-placeholder-password docker compose --profile vpn config --quiet
       - name: Build production container
         run: docker build --tag replyforge-ci .
       - name: Verify playbook is present
