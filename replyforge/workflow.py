@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import secrets
 from datetime import datetime, timezone
+import re
 
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -21,6 +22,30 @@ class Proposal:
     actions: list[tuple[str, str]] = field(default_factory=list)
     menu: bool = True
 
+
+
+
+def infer_customer_slots(text: str) -> dict[str, str]:
+    """Extract obvious customer-provided device/app details without an LLM call."""
+    value = (text or "").casefold()
+    slots: dict[str, str] = {}
+    if any(x in value for x in ("آیفون", "ایفون", "iphone", "ios")):
+        slots["device"] = "ios"
+    elif any(x in value for x in ("اندروید", "android", "سامسونگ", "شیائومی")):
+        slots["device"] = "android"
+    elif any(x in value for x in ("ویندوز", "windows", "لپ تاپ", "لپ‌تاپ")):
+        slots["device"] = "windows"
+    for name, aliases in (
+        ("v2rayNG", ("v2rayng", "وی تو ری ان جی")),
+        ("V2Box", ("v2box", "وی تو باکس")),
+        ("Streisand", ("streisand", "استرایسند")),
+        ("Happ", ("happ",)),
+        ("Hiddify", ("hiddify", "هیدیفای")),
+    ):
+        if any(re.search(r"\b" + re.escape(alias) + r"\b", value) for alias in aliases):
+            slots["application"] = name
+            break
+    return slots
 
 def is_fa(playbook):
     return playbook.get("locale") == "fa"
@@ -56,6 +81,19 @@ def _display_state(session: Session, conversation: Conversation, playbook: dict,
     for _ in range(10):
         flow = playbook["workflows"][conversation.workflow]
         state = flow["states"][conversation.step]
+        # Don't re-ask what the customer already explicitly told us during this flow.
+        if conversation.workflow == "connection" and conversation.step in ("device", "app"):
+            field = "device" if conversation.step == "device" else "application"
+            prefilled = (conversation.state or {}).get("recent_slots", {}).get(field)
+            if prefilled and state.get("field") == field and state.get("next"):
+                data = dict(conversation.state or {})
+                answers = dict(data.get("answers") or {})
+                answers[field] = prefilled
+                data["answers"] = answers
+                data["recent_slots"] = {k: v for k, v in data["recent_slots"].items() if k != field}
+                conversation.state = data
+                conversation.step = state["next"]
+                continue
         kind = state.get("type")
         if kind == "handoff":
             return human(session, conversation, playbook, reason=conversation.workflow)
@@ -94,7 +132,9 @@ def start_flow(session: Session, conv: Conversation, playbook: dict, ai: AIEngin
         return root_menu(playbook)
     conv.workflow = name
     conv.step = flow["start"]
-    conv.state = {"answers": {}, "flow_started_at": datetime.now(timezone.utc).isoformat()}
+    prior_slots = dict((conv.state or {}).get("recent_slots") or {})
+    conv.state = {"answers": {}, "recent_slots": prior_slots,
+                  "flow_started_at": datetime.now(timezone.utc).isoformat()}
     return _display_state(session, conv, playbook, ai, settings)
 
 
@@ -150,6 +190,11 @@ def accept_input(session: Session, conv: Conversation, playbook: dict, ai: AIEng
     if conv.owner != "ai":
         return Proposal("", [], False)
     lowered = text.casefold()
+    slots = infer_customer_slots(text)
+    if slots:
+        info = dict(conv.state or {})
+        info["recent_slots"] = {**info.get("recent_slots", {}), **slots}
+        conv.state = info
     if any(hint in lowered for hint in ("پشتیبان انسانی", "اپراتور انسانی", "human support", "speak to human")):
         return human(session, conv, playbook)
     if lowered.strip() in ("منو", "منوی اصلی", "menu", "/start"):
