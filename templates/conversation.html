@@ -36,6 +36,11 @@ button.secondary{background:#38455d}form{display:inline}
 <div class="messages">{% for m in messages %}
 <div class="msg {{ 'out' if m.direction == 'out' else 'in' }}">
 <span class="meta">{{ m.direction }} · {{ m.kind }} · {{ m.created_at }}</span>{{ m.content }}
+{% if m.kind == 'photo' and m.data and m.data.get('file_id') %}
+<div><img src="/admin/media/{{ m.id }}" loading="lazy" alt="{{ _('Customer attachment', 'تصویر ارسالی مشتری') }}" style="max-width:100%;max-height:390px;border-radius:10px;margin-top:8px"></div>
+{% elif m.kind == 'voice' and m.data and m.data.get('file_id') %}
+<div><audio controls preload="none" src="/admin/media/{{ m.id }}" style="width:100%;margin-top:8px"></audio></div>
+{% endif %}
 </div>
 {% else %}<div class="card">{{ _('No messages yet.', 'هنوز پیامی ثبت نشده.') }}</div>{% endfor %}</div>
 </body></html>
