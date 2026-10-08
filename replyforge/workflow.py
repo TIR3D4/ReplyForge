@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import re
 
 from sqlalchemy import or_, select
@@ -61,10 +61,26 @@ def root_menu(playbook: dict) -> Proposal:
 def human(session: Session, conversation: Conversation, playbook: dict, reason="requested") -> Proposal:
     conversation.owner = "human_pending"
     existing = session.scalar(select(Ticket).where(
-        Ticket.conversation_id == conversation.id, Ticket.status == "open",
+        Ticket.conversation_id == conversation.id,
+        Ticket.status.in_(("open", "in_progress")),
     ))
     if existing is None:
-        session.add(Ticket(conversation_id=conversation.id, reason=reason))
+        now = datetime.now(timezone.utc)
+        limit = playbook.get("support_sla_minutes", 60)
+        minutes = limit if type(limit) is int and 5 <= limit <= 1440 else 60
+        category = reason if reason in (
+            "payment", "delivery", "subscription", "connection", "question",
+        ) else "general"
+        severity = playbook.get("support_priorities", {})
+        priority = severity.get(category, "high" if category == "payment" else "normal") if isinstance(severity, dict) else "normal"
+        if priority not in ("low", "normal", "high", "urgent"):
+            priority = "normal"
+        session.add(Ticket(
+            conversation_id=conversation.id, reason=reason,
+            category=category, priority=priority,
+            sla_due_at=now + timedelta(minutes=minutes),
+            last_customer_at=now,
+        ))
     return Proposal(playbook.get("handoff_text", "Human support has been requested."), [], False)
 
 

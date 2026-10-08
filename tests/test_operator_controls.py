@@ -128,3 +128,91 @@ def test_human_takeover_preempts_queued_ai_reply(database, test_settings, fake_t
     assert fake_telegram.sent == []
     with session_scope(database) as db:
         assert db.scalar(select(Outbox)).status == "cancelled"
+
+
+
+def test_two_queued_operator_replies_preserve_order(database, test_settings, fake_telegram):
+    """A later human revision must not invalidate an earlier intentional reply."""
+    settings = replace(test_settings, auto_reply_enabled=False)
+    _seed(database)
+    proc = Processor(settings, database, fake_telegram)
+    with session_scope(database) as db:
+        db.add(Event(update_id=601, payload=_inbound(601), status="processing"))
+    proc.process_event(601)
+    with session_scope(database) as db:
+        conv_id = db.scalar(select(Conversation)).id
+    app = build_app(settings, factory=database, telegram=fake_telegram)
+    with TestClient(app) as client:
+        for text in ("پیام اول", "پیام دوم"):
+            response = client.post(
+                f"/admin/conversations/{conv_id}/reply", auth=_auth(settings),
+                data={"csrf_token": _csrf(settings), "message": text},
+                follow_redirects=False,
+            )
+            assert response.status_code == 303
+    assert proc.tick()
+    assert proc.tick()
+    assert [item[2] for item in fake_telegram.sent] == ["پیام اول", "پیام دوم"]
+    with session_scope(database) as db:
+        outbox = db.scalars(select(Outbox).order_by(Outbox.id)).all()
+        assert [item.status for item in outbox] == ["sent", "sent"]
+
+
+def test_uncertain_reply_blocks_next_until_explicit_reconciliation(
+    database, test_settings, fake_telegram,
+):
+    settings = replace(test_settings, auto_reply_enabled=False)
+    _seed(database)
+    proc = Processor(settings, database, fake_telegram)
+    with session_scope(database) as db:
+        db.add(Event(update_id=602, payload=_inbound(602), status="processing"))
+    proc.process_event(602)
+    with session_scope(database) as db:
+        conv_id = db.scalar(select(Conversation)).id
+    app = build_app(settings, factory=database, telegram=fake_telegram)
+    with TestClient(app) as client:
+        for message in ("اولی", "دومی"):
+            assert client.post(
+                f"/admin/conversations/{conv_id}/reply", auth=_auth(settings),
+                data={"csrf_token": _csrf(settings), "message": message},
+                follow_redirects=False,
+            ).status_code == 303
+    from replyforge.telegram import TelegramError
+    original_send = fake_telegram.send
+    attempts = []
+
+    def flaky_send(*args, **kwargs):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise TelegramError("transport_unconfirmed", uncertain=True)
+        return original_send(*args, **kwargs)
+
+    fake_telegram.send = flaky_send
+    assert proc.tick()  # First send becomes uncertain
+    assert proc.tick()  # Second send is gated
+    assert len(fake_telegram.sent) == 0
+    with session_scope(database) as db:
+        uncertain = db.scalar(select(Outbox).where(Outbox.status == "uncertain"))
+        assert uncertain is not None
+        second = db.scalar(select(Outbox).where(Outbox.id > uncertain.id))
+        assert second.status == "pending"
+
+    with TestClient(app) as client:
+        invalid = client.post(
+            f"/admin/outbox/{uncertain.id}/resolve", auth=_auth(settings),
+            data={"csrf_token": "wrong", "resolution": "confirmed_sent"},
+        )
+        assert invalid.status_code == 403
+        confirmed = client.post(
+            f"/admin/outbox/{uncertain.id}/resolve", auth=_auth(settings),
+            data={"csrf_token": _csrf(settings), "resolution": "confirmed_sent"},
+            follow_redirects=False,
+        )
+        assert confirmed.status_code == 303
+    from replyforge.models import utcnow
+    from datetime import timedelta
+    with session_scope(database) as db:
+        next_job = db.scalar(select(Outbox).where(Outbox.id == second.id))
+        next_job.available_at = utcnow() - timedelta(seconds=1)
+    assert proc.tick()
+    assert [item[2] for item in fake_telegram.sent] == ["دومی"]

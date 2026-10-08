@@ -6,15 +6,18 @@ ReplyForge is a **self-hosted, open-source Telegram Business support system** th
 
 [Setup](#quick-start) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Playbooks](docs/WORKFLOWS.md) · [API](docs/API.md) · [Persian guide](docs/README-fa.md) · [Live acceptance tests](docs/SMOKE_TEST.md)
 
-## V1 support hardening — release candidate
+## ReplyForge V1.1 — professional support release candidate
 
 - Official Telegram Business connection, including Business permission updates, callbacks, manual-owner takeover, edited/deleted message handling.
-- Compact one/two-column inline menu with editing instead of spamming new messages. Stale callbacks are rejected, and handoff edits clear old buttons.
+- **V1.1 professional ticketing:** searchable priority queue, assignment, private notes, initial-response SLA, audited escalation, closing/reopening and status history.
+- **V1.1 human-in-the-loop AI:** model-assisted *draft suggestions* for operators only, with edit-before-send approval, and explicitly reviewed knowledge candidates based on resolved tickets.
+- **V1.1 privacy:** configurable 180-day data-content scrubbing, including ticket summaries, and explicit administrator-confirmed local customer data erasure. No automatic deletion of external Telegram or upstream panel records.
+- Compact one/two-column inline menu with editing instead of spamming new messages. Consecutive inbound texts can be batched using MESSAGE_DEBOUNCE_MS to avoid multiple AI calls. Stale callbacks are rejected, and handoff edits clear old buttons.
 - Durable PostgreSQL inbox/outbox, idempotent incoming update IDs, safe unknown-delivery handling, and event retry limits.
 - Configurable YAML menus and **multi-step workflows**: ask for a choice, reference, image, question, subscription link; close or hand off.
 - Optional AI intent/choice recognition, semantic selection among approved FAQs, opt-in screenshot reading and opt-in voice transcription with strict file-size and daily model budgets. Rule-driven workflows continue when the model is unavailable.
 - A conservative, approved-only FAQ knowledge base. The model never makes up payment status or account balances.
-- Default **monitor-only** onboarding (AI replies disabled until an administrator opts in), emergency pause, human handoff, a real operator reply composer, inbound evidence notifications and customer-confirmed resolution tracking.
+- SLA-driven ticket priority, assignment, private notes, triage and audited escalation. Default **monitor-only** onboarding (AI replies disabled until an administrator opts in), emergency pause, human handoff, a real operator reply composer, inbound evidence notifications and customer-confirmed resolution tracking.
 - Marzban and Pasarguard **read-only account status**, optional catalog sync and HMAC token matching across trusted panel/relay domain variants. The AzadBird preset handles Persian VPN and payment triage.
 - Internal link-provisioning API for a store/billing integration. No arbitrary customer URL is fetched.
 - English default preset, Persian VPN preset, responsive dashboard and tests.
@@ -25,7 +28,7 @@ V1 is **not** an autonomous payment verifier. A receipt image is collected as ev
 
 ## Production activation criteria
 
-**V1.0.0rc1 is a release candidate, not a claim of production certification.** New deployments default to monitor-only. Before enabling AI for real customers, complete the staged checklist in [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md), using the *actual* Telegram Business connection and installed Marzban/Pasarguard versions. CI cannot replace this live acceptance test.
+**V1.1.0rc1 is a release candidate, not a claim of production certification.** New deployments default to monitor-only. Before enabling AI for real customers, complete the staged checklist in [docs/SMOKE_TEST.md](docs/SMOKE_TEST.md), using the *actual* Telegram Business connection and installed Marzban/Pasarguard versions. CI cannot replace this live acceptance test.
 
 ## Quick start
 

@@ -1,4 +1,4 @@
-# ReplyForge V1 — Live acceptance test plan
+# ReplyForge V1.1 — Live acceptance test plan
 
 This test plan is a **release gate**, not a claim of prior production validation. Automated tests use simulated Bot API and provider responses. Do the following on a staging Business account with explicit participant permission before enabling ReplyForge for public customers.
 
@@ -22,7 +22,7 @@ This test plan is a **release gate**, not a claim of prior production validation
 | TG-04 | Toggle AI on, first contact | One menu message; the choices work |
 | TG-05 | Tap choice, then back | Same message edited wherever Telegram permits |
 | TG-06 | Tap a stale callback after newer menu | Stale action ignored; no duplicated workflow |
-| TG-07 | Customer writes three short messages | Confirm no excessive replies and that each actionable message has appropriate behavior; batching is **not** implemented |
+| TG-07 | Customer writes three short messages | Short text burst coalesces into one model request when safe while retaining each individual Telegram message |
 | TG-08 | Customer writes device/app in first message | Device and app are not asked a second time |
 | TG-09 | Customer shares an imported Marzban subscription | Current status returned without disclosing the link |
 | TG-10 | Customer shares Pasarguard tunnel subscription | Current status returned using read-only panel API |
@@ -44,13 +44,25 @@ This test plan is a **release gate**, not a claim of prior production validation
 | SAFETY-02 | Emergency AI pause during queued reply | No new automated response; operator remains functional |
 | SAFETY-03 | Telegram send response becomes ambiguous | Outbox marked uncertain; no blind duplicate sends |
 | SAFETY-04 | Restart worker mid-queue | Queue recovers or marks ambiguous delivery for manual review |
+| SAFETY-05 | Two rapid operator replies | Both messages eventually send in FIFO order, neither silently canceled |
+| SAFETY-06 | Unknown outcome of earlier operator send | Later send stays blocked until manual reconciliation |
+| SAFETY-07 | Close ticket after human takeover | AI remains paused and does not resume implicitly |
+| OPS-04 | SLA expires during continuous queue activity | Worker alerts on schedule with one audit record |
+| OPS-05 | Human reply enqueued, but Telegram delivery fails | Initial-response SLA stays open; later genuine delivery closes it |
+| AI-01 | Click Suggest Reply | Draft only, visible to operators; nothing is sent to customer |
+| AI-02 | Suggest for disputed payment | No unsupported paid/confirmed statement |
+| KB-01 | Close ticket with verified resolution summary | Unpublished FAQ candidate appears for review |
+| KB-02 | Reject FAQ candidate | Answer never becomes part of active knowledge |
+| PRIV-01 | Retention sweep | Historical text, attachment references, notes and resolution summaries scrubbed |
+| PRIV-02 | Explicit local erasure | Customer data and dependent records removed from ReplyForge, not from Telegram |
+| PRIV-03 | Erasure requested with uncertain outbound send | Rejected pending manual reconciliation |
 | OPS-01 | Stop worker process | `/healthz` may stay 200; `/readyz` becomes 503 |
 | OPS-02 | Restore from encrypted backup to staging | Restored conversations and migrations validate |
 | OPS-03 | 100+ controlled test conversations | No unwanted cross-chat data leakage; inspect latency and backlog |
 
 ## Deployment acceptance rules
 
-- **Block public activation** if TG-01 through TG-06, SAFETY-01 through SAFETY-04 or PAY-03 fail.
+- **Block public activation** if TG-01 through TG-07, SAFETY-01 through SAFETY-07, OPS-05, KB-01 or PAY-03 fail.
 - **Block live subscription diagnostics** until TG-09 through TG-14 pass on the actual panel versions.
 - **Keep media AI off** until appropriate customer disclosure and MEDIA-01 through MEDIA-04 are verified.
 - Define acceptable response latency, backlog and operator staffing before broad activation. A model answer is not equivalent to successful issue resolution.

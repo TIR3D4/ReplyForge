@@ -18,7 +18,7 @@ Report vulnerabilities privately to the repository owner through GitHub's privat
 
 ## Data retention
 
-V1 records workflow history and support tickets until an operator deletes/archives records at the database level. Deployers are responsible for publishing a privacy policy and implementing a deletion process. Do not claim automatic GDPR compliance or permanent data minimization.
+By default, the worker scrubs message contents and Telegram media file IDs older than DATA_RETENTION_DAYS (180 days), and old terminal outbound texts and internal suggestions/notes. Set DATA_RETENTION_DAYS=0 to disable automatic scrubbing. This does not remove conversation IDs, billing records, database backups or data stored by Telegram, model providers, or VPN panels; deployers still need a suitable privacy and backup-retention policy.
 
 ## Limitations
 
@@ -36,3 +36,16 @@ Trusted Marzban/Pasarguard admin APIs may be used to list existing users. Only H
 ## Staged activation and operator control
 
 New installs default to monitor-only mode. The authenticated admin can pause automated customer replies immediately while leaving human replies available. Database worker heartbeats enable alerting when background processing fails. The Telegram Business reply time window is still enforced.
+
+
+## V1.1 reviewed drafts and knowledge extraction
+
+The operator reply assistant creates a **draft only**. Its output is not authorized to send as the Business account; an authenticated human must edit and submit it. Financial drafts avoid declaring a payment confirmed without trusted payment evidence. Resolution-derived knowledge candidates remain unpublished until explicit human approval. Never approve suggested FAQs containing personal customer information.
+
+Human-authored replies preserve FIFO order; later sends pause if an earlier send has an ambiguous outcome. Staff must reconcile ambiguous Telegram results before sending dependent messages.
+
+## Local erasure and external retention boundaries
+
+The authenticated erasure control requires exact confirmation and declines execution when a conversation has uncertain or in-flight outgoing delivery. It removes local conversation metadata, messages, tickets, notes, drafts, suggestions, related audit entries and chat-specific subscription bindings. It cannot erase Telegram message history, upstream panel data, third-party AI records or existing backup copies.
+
+DATA_RETENTION_DAYS defaults to 180 and controls scheduled content scrubbing of eligible historical messages, media references, staff notes, AI drafts, unreviewed knowledge candidates and completed ticket summaries. This preserves operational row structure and is not equivalent to deletion of every user identifier or every backup copy. Deployers remain responsible for informed consent and privacy compliance.

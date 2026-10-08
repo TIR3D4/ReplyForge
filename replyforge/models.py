@@ -82,8 +82,38 @@ class Ticket(Base):
     conversation_id: Mapped[int] = mapped_column(Integer, ForeignKey("conversations.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="open", nullable=False)
     reason: Mapped[str] = mapped_column(String(100), default="manual")
+    category: Mapped[str] = mapped_column(String(50), default="general", nullable=False)
+    priority: Mapped[str] = mapped_column(String(12), default="normal", nullable=False)
+    assignee: Mapped[str | None] = mapped_column(String(100))
+    first_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_customer_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sla_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolution_summary: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+class TicketNote(Base):
+    """Internal notes are strictly private; no Telegram send is generated."""
+    __tablename__ = "ticket_notes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(Integer, ForeignKey("tickets.id"), nullable=False)
+    author: Mapped[str] = mapped_column(String(100), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class OperatorDraft(Base):
+    """Unsent, human-reviewed AI suggestion with explicit provenance."""
+    __tablename__ = "operator_drafts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(Integer, ForeignKey("conversations.id"), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="suggested", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
 
 class Knowledge(Base):
     __tablename__ = "knowledge"
@@ -91,6 +121,18 @@ class Knowledge(Base):
     question: Mapped[str] = mapped_column(String(500), nullable=False)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+class KnowledgeSuggestion(Base):
+    """Draft FAQ distilled from a resolved ticket; human approval is required."""
+    __tablename__ = "knowledge_suggestions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(Integer, ForeignKey("tickets.id"), nullable=False)
+    question: Mapped[str] = mapped_column(String(500), nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 class Binding(Base):
     __tablename__ = "subscription_bindings"
@@ -114,6 +156,10 @@ class Audit(Base):
 Index("idx_event_queue", Event.status, Event.available_at)
 Index("idx_outbox_queue", Outbox.status, Outbox.available_at)
 Index("idx_tickets_status", Ticket.status, Ticket.created_at)
+Index("idx_tickets_sla", Ticket.status, Ticket.first_response_at, Ticket.sla_due_at)
+Index("idx_ticket_notes", TicketNote.ticket_id, TicketNote.created_at)
+Index("idx_drafts_conversation", OperatorDraft.conversation_id, OperatorDraft.status)
+Index("idx_knowledge_review", KnowledgeSuggestion.status, KnowledgeSuggestion.created_at)
 
 
 class PlaybookVersion(Base):

@@ -9,9 +9,13 @@ body{max-width:800px;margin:0 auto;padding:24px}a{color:#9ddaf8}
 .out{margin-left:auto;background:#17434b}.meta{display:block;font-size:12px;color:#a9b9ce;margin-bottom:6px}
 button{border:0;border-radius:10px;background:#176c72;color:white;padding:12px 16px;font-weight:600;cursor:pointer}
 button.secondary{background:#38455d}form{display:inline}
+.ticket-form{display:grid;gap:10px;margin-top:12px}
+.ticket-form input,.ticket-form textarea,.ticket-form select{background:#0b1525;color:#fff;width:100%;border:1px solid #43536d;border-radius:8px;padding:10px}
+.note{background:#1c3450;border-radius:9px;padding:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+
 </style></head>
 <body>
-<a href="/admin">{{ _('← Dashboard', '← داشبورد') }}</a><h1>{{ _('Conversation #', 'گفتگو #') }}{{ conv.id }}</h1>
+<a href="/admin">{{ _('← Dashboard', '← داشبورد') }}</a> · <a href="/admin/tickets">🎧 {{ _('Tickets', 'تیکت‌ها') }}</a><h1>{{ _('Conversation #', 'گفتگو #') }}{{ conv.id }}</h1>
 <div class="card"><strong>{{ _('Telegram chat:', 'شناسه تلگرام:') }}</strong> {{ conv.chat_id }} <a href="tg://user?id={{ conv.chat_id }}">{{ _('Open in Telegram', 'بازکردن در تلگرام') }}</a> · <strong>{{ _('Owner:', 'مسئول:') }}</strong> {{ conv.owner }}
 <p><strong>{{ _('Workflow:', 'فرایند:') }}</strong> {{ conv.workflow or 'None' }} · <strong>{{ _('Step:', 'مرحله:') }}</strong> {{ conv.step or 'None' }}</p>
 <form method="post" action="/admin/conversations/{{ conv.id }}/takeover">
@@ -19,18 +23,85 @@ button.secondary{background:#38455d}form{display:inline}
 <form method="post" action="/admin/conversations/{{ conv.id }}/resume">
 <input type="hidden" name="csrf_token" value="{{ csrf }}"><button>{{ _('Resume AI', 'بازگشت به AI') }}</button></form>
 </div>
+
+{% if ticket %}
+<section class="card">
+<h2>🎧 {{ _('Ticket', 'تیکت') }} #{{ ticket.id }}</h2>
+<p>{{ _('Status', 'وضعیت') }}: {{ ticket.status }} ·
+{{ _('Priority', 'اولویت') }}: <b>{{ ticket.priority }}</b> ·
+{{ _('SLA deadline', 'مهلت پاسخ اولیه') }}: {{ ticket.sla_due_at or '—' }}
+{% if ticket.escalated_at %}<b>🚨 {{ _('Escalated', 'فوری') }}</b>{% endif %}</p>
+{% if ticket.status != 'closed' %}
+<form class="ticket-form" method="post" action="/admin/tickets/{{ ticket.id }}/triage">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<label>{{ _('Priority', 'اولویت') }}<select name="priority">{% for p in ['low','normal','high','urgent'] %}
+<option value="{{ p }}" {% if ticket.priority == p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></label>
+<label>{{ _('Category', 'دسته') }}<input name="category" maxlength="50" value="{{ ticket.category }}" required></label>
+<label>{{ _('Assignee', 'مسئول رسیدگی') }}<input name="assignee" maxlength="100" value="{{ ticket.assignee or '' }}" placeholder="operator"></label>
+<label>{{ _('Ticket status', 'وضعیت تیکت') }}<select name="status_value">
+<option value="open" {% if ticket.status == 'open' %}selected{% endif %}>open</option>
+<option value="in_progress" {% if ticket.status == 'in_progress' %}selected{% endif %}>in_progress</option>
+</select></label><button>{{ _('Save triage', 'ثبت اولویت و مسئول') }}</button></form>
+<form class="ticket-form" method="post" action="/admin/tickets/{{ ticket.id }}/close">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<label>{{ _('Resolution summary (optional)', 'خلاصه نتیجه (اختیاری)') }}
+<textarea name="resolution" maxlength="2000" rows="2" placeholder="{{ _('How was this handled?', 'چطور پیگیری یا رفع شد؟') }}"></textarea></label>
+<button type="submit" class="secondary">{{ _('Close ticket — AI stays paused', 'بستن تیکت — AI متوقف می‌ماند') }}</button>
+</form>
+{% else %}
+<p>{{ _('Resolution', 'نتیجه') }}: {{ ticket.resolution_summary or '—' }}</p>
+<form method="post" action="/admin/tickets/{{ ticket.id }}/reopen">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button>{{ _('Reopen ticket', 'بازگشایی تیکت') }}</button></form>
+{% endif %}
+<h3>{{ _('Private staff notes', 'یادداشت‌های خصوصی اپراتور') }}</h3>
+{% for note in notes %}<div class="note"><small>{{ note.author }} · {{ note.created_at }}</small>
+<div>{{ note.content }}</div></div>{% else %}<small>{{ _('No notes yet.', 'یادداشتی ثبت نشده.') }}</small>{% endfor %}
+<form class="ticket-form" method="post" action="/admin/tickets/{{ ticket.id }}/notes">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<textarea name="content" rows="3" maxlength="2000" required placeholder="{{ _('Private note: not sent to customer', 'یادداشت خصوصی؛ به مشتری ارسال نمی‌شود') }}"></textarea>
+<button>{{ _('Add private note', 'ثبت یادداشت خصوصی') }}</button></form>
+</section>
+{% endif %}
 <section class="card">
 <h2>{{ _('Human operator reply', 'پاسخ اپراتور انسانی') }}</h2>
+<p>{{ _('Optional AI assistance prepares a draft; only you decide what to send.', 'دستیار AI فقط متن پیشنهادی می‌سازد؛ ارسال نهایی با تأیید شماست.') }}</p>
+<form method="post" action="/admin/conversations/{{ conv.id }}/suggest">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button class="secondary" type="submit">✨ {{ _('Suggest reply', 'پیشنهاد پاسخ با AI') }}</button>
+</form>
+{% if draft %}
+<div class="note" style="margin:12px 0">
+<strong>✨ {{ _('Draft for review', 'پیش‌نویس برای بررسی') }}</strong> · <small>{{ draft.source }}</small>
+<p>{{ _('Verify facts and edit before sending, especially payments and subscription status.', 'قبل از ارسال، صحت اطلاعات خصوصاً وضعیت پرداخت و اشتراک را بررسی و متن را ویرایش کنید.') }}</p>
+<form method="post" action="/admin/conversations/{{ conv.id }}/draft/{{ draft.id }}/dismiss">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button type="submit" class="secondary">{{ _('Discard suggestion', 'رد پیشنهاد') }}</button>
+</form></div>
+{% endif %}
+
 <p>{{ _('Sending claims this chat for a human and checks business permissions.', 'با ارسال پاسخ، گفتگو به اپراتور واگذار می‌شود و مجوز تلگرام بررسی خواهد شد.') }}</p>
 <form method="post" action="/admin/conversations/{{ conv.id }}/reply" style="display:grid;gap:12px">
 <input type="hidden" name="csrf_token" value="{{ csrf }}">
-<textarea name="message" maxlength="3500" rows="4" required placeholder="{{ _('Write your message…', 'پیام را بنویسید…') }}" style="width:100%;padding:12px;border-radius:10px;background:#0b1525;color:white;border:1px solid #38455d;resize:vertical"></textarea>
+{% if draft %}<input type="hidden" name="draft_id" value="{{ draft.id }}">{% endif %}
+<textarea name="message" maxlength="3500" rows="4" required placeholder="{{ _('Write your message…', 'پیام را بنویسید…') }}" style="width:100%;padding:12px;border-radius:10px;background:#0b1525;color:white;border:1px solid #38455d;resize:vertical">{{ draft.text if draft else '' }}</textarea>
 <div><button type="submit">{{ _('Send from Business account', 'ارسال از اکانت پشتیبانی') }}</button></div>
 </form>
 {% if outbound %}
 <h3>{{ _('Operator delivery history', 'وضعیت ارسال‌های اپراتور') }}</h3>
 {% for job in outbound %}<p>#{{ job.id }} — {{ job.status }} {% if job.error_code %}({{ job.error_code }}){% endif %}</p>{% endfor %}
 {% endif %}
+</section>
+<section class="card" style="border-color:#8b444f">
+<h2>🗑️ {{ _('Erase local customer data', 'حذف اطلاعات مشتری از ReplyForge') }}</h2>
+<p>{{ _('This permanently deletes local chat history, notes, drafts, tickets and local associations. It does not delete Telegram chats, VPN panel users or backups.', 'این عملیات تاریخچه، تیکت‌ها، یادداشت‌ها، پیش‌نویس‌ها و ارتباطات داخلی مشتری را برای همیشه از پایگاه داده حذف می‌کند. پیام‌های تلگرام، پنل VPN و نسخه‌های پشتیبان حذف نمی‌شوند.') }}</p>
+<form class="ticket-form" method="post" action="/admin/conversations/{{ conv.id }}/erase"
+onsubmit="return confirm('Permanently erase the local customer record?');">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<label>{{ _('Type exactly:', 'دقیقاً عبارت زیر را وارد کنید:') }} <code>ERASE {{ conv.chat_id }}</code>
+<input name="confirmation" autocomplete="off" maxlength="40" placeholder="ERASE {{ conv.chat_id }}" required></label>
+<button type="submit" class="secondary">{{ _('Erase local record permanently', 'حذف دائمی اطلاعات داخلی') }}</button>
+</form>
 </section>
 <h2>{{ _('Message history (most recent 100)', 'تاریخچه پیام‌ها (۱۰۰ مورد آخر)') }}</h2>
 <div class="messages">{% for m in messages %}

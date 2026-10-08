@@ -16,12 +16,16 @@ from .models import (
 )
 from .security import redact
 from .playbooks import effective_playbook
+from .privacy import prune_history
 from .telegram import TelegramClient, TelegramError
 from .workflow import (
     Proposal, accept_input, apply_action, build_markup, callback_action, root_menu
 )
 
 log = logging.getLogger(__name__)
+
+MAX_TEXT_BATCH = 8
+MAX_BATCH_CHARACTERS = 2400
 
 REPLY_WINDOW = timedelta(hours=23, minutes=50)
 
@@ -145,7 +149,8 @@ class Processor:
 
         return AIEngine(self.settings, allow_call=permit_call)
 
-    def _process_payload(self, session: Session, payload: dict) -> None:
+    def _process_payload(self, session: Session, payload: dict,
+                         *, batch_messages: list[dict] | None = None) -> None:
         if "business_connection" in payload:
             update_connection(session, payload["business_connection"])
             return
@@ -247,10 +252,24 @@ class Processor:
                 ))
             conv.owner = "human"
             conv.revision += 1
+            existing = session.scalar(select(Ticket).where(
+                Ticket.conversation_id == conv.id,
+                Ticket.status.in_(("open", "in_progress")),
+            ).order_by(Ticket.id.desc()).limit(1))
+            if existing:
+                existing.status = "in_progress"
+                existing.first_response_at = existing.first_response_at or utcnow()
+                existing.updated_at = utcnow()
             session.add(Audit(conversation_id=conv.id, actor="owner", action="takeover"))
             return
         if not record_inbound(session, conv, message):
             return
+        # Persist each constituent message independently. Only the prompt/context
+        # is combined; Telegram message IDs and attachments remain traceable.
+        accepted_messages = [message]
+        for item in batch_messages or []:
+            if record_inbound(session, conv, item):
+                accepted_messages.append(item)
         if conv.owner != "ai" or not conn.can_reply or not auto_reply_enabled(session, self.settings):
             if conv.owner in ("human", "human_pending"):
                 self._queue_human_followup(session, conv, message)
@@ -260,7 +279,10 @@ class Processor:
         file_id = photo[-1].get("file_id") if photo else (
             document.get("file_id") if str(document.get("mime_type", "")).startswith("image/") else None
         )
-        text = message.get("text") or message.get("caption") or ""
+        text = "\n".join(
+            str(item.get("text") or item.get("caption") or "")
+            for item in accepted_messages
+        )[:MAX_BATCH_CHARACTERS]
         ai = self._agent(session, conv)
         voice = message.get("voice") or message.get("audio") or {}
         if isinstance(voice, dict) and voice.get("file_id"):
@@ -315,6 +337,13 @@ class Processor:
 
     def _queue_human_followup(self, session: Session, conv: Conversation, message: dict) -> None:
         """Notify an already-assigned human if new evidence arrived."""
+        ticket = session.scalar(select(Ticket).where(
+            Ticket.conversation_id == conv.id,
+            Ticket.status.in_(("open", "in_progress")),
+        ).order_by(Ticket.id.desc()).limit(1))
+        if ticket is not None:
+            ticket.last_customer_at = utcnow()
+            ticket.updated_at = utcnow()
         if not self.settings.support_alert_chat_id:
             return
         photo = message.get("photo") or []
@@ -350,14 +379,15 @@ class Processor:
         if not self.settings.support_alert_chat_id or conv.owner != "human_pending":
             return
         ticket = session.scalar(select(Ticket).where(
-            Ticket.conversation_id == conv.id, Ticket.status == "open",
+            Ticket.conversation_id == conv.id,
+            Ticket.status.in_(("open", "in_progress")),
         ))
         if ticket:
             session.add(Outbox(
                 conversation_id=conv.id, revision=conv.revision,
                 kind="alert", text=f"🎧 ReplyForge ticket #{ticket.id}\n"
                 f"Customer chat: {conv.chat_id}\n"
-                f"Reason: {ticket.reason}\n"
+                f"Reason: {ticket.reason} | Priority: {ticket.priority}\n"
                 f"Review in /admin/conversations/{conv.id}",
                 buttons=[],
             ))
@@ -382,15 +412,59 @@ class Processor:
                         buttons=[{"file_id": file_id}],
                     ))
 
+    @staticmethod
+    def _batchable(msg: dict) -> bool:
+        return (isinstance(msg, dict) and isinstance(msg.get("text"), str)
+                and bool(msg["text"].strip()) and isinstance(msg.get("from"), dict)
+                and isinstance(msg["from"].get("id"), int)
+                and not any(msg.get(k) for k in (
+                    "voice", "audio", "photo", "document", "video",
+                    "sender_business_bot",
+                )))
+
     def process_event(self, update_id: int) -> None:
         with session_scope(self.factory) as session:
             event = session.get(Event, update_id)
             if not event or event.status != "processing":
                 return
-            self._process_payload(session, event.payload)
-            event.status = "done"
-            event.payload = {}  # short-lived inbound secrets never remain in event queue
-            event.claimed_until = None
+            source = event.payload.get("business_message")
+            merged: list[Event] = []
+            combined: list[dict] = []
+            if self.settings.message_debounce_ms and self._batchable(source):
+                key = (source.get("business_connection_id"),
+                       (source.get("chat") or {}).get("id"),
+                       source["from"]["id"])
+                conn = session.get(BusinessConnection, key[0])
+                # Owner-authored replies must each be processed as takeover,
+                # never coalesced with a customer message or discarded.
+                if key[2] != (conn.owner_user_id if conn else None):
+                    next_events = session.scalars(select(Event).where(
+                        Event.status == "pending",
+                        Event.update_id > update_id,
+                    ).order_by(Event.update_id).limit(MAX_TEXT_BATCH).with_for_update(
+                        skip_locked=True,
+                    )).all()
+                    total = len(source["text"])
+                    for next_event in next_events:
+                        incoming = (next_event.payload or {}).get("business_message")
+                        if not self._batchable(incoming):
+                            break
+                        actual = (incoming.get("business_connection_id"),
+                                  (incoming.get("chat") or {}).get("id"),
+                                  incoming["from"]["id"])
+                        count = len(incoming["text"])
+                        if actual != key or total + count > MAX_BATCH_CHARACTERS:
+                            break  # Preserve event ordering across customers/media.
+                        merged.append(next_event)
+                        combined.append(incoming)
+                        total += count
+                        if len(merged) >= MAX_TEXT_BATCH - 1:
+                            break
+            self._process_payload(session, event.payload, batch_messages=combined)
+            for completed in [event, *merged]:
+                completed.status = "done"
+                completed.payload = {}  # never retain raw subscription links in a completed event
+                completed.claimed_until = None
 
     def delivery(self, outbox_id: int):
         with session_scope(self.factory) as session:
@@ -411,10 +485,29 @@ class Processor:
             permitted = is_alert or (
                 conn.enabled and conn.can_reply and recent_inbound and correct_owner
             )
-            if conv.revision != job.revision or not permitted:
+            # AI drafts are revision-fenced; intentionally queued human messages
+            # are independent commands and must NOT erase each other when the
+            # operator types twice before the worker flushes the outbox.
+            revision_stale = job.kind != "human" and conv.revision != job.revision
+            if revision_stale or not permitted:
                 job.status = "cancelled"
                 job.error_code = "obsolete_or_not_permitted"
                 return
+            if job.kind == "human":
+                older = session.scalar(select(Outbox.id).where(
+                    Outbox.conversation_id == conv.id,
+                    Outbox.kind == "human",
+                    Outbox.id < job.id,
+                    Outbox.status.in_(("pending", "sending", "uncertain")),
+                ).order_by(Outbox.id).limit(1))
+                if older is not None:
+                    # Preserve per-chat operator message ordering even after a
+                    # Telegram rate limit or unknown delivery outcome.
+                    job.status = "pending"
+                    job.available_at = utcnow() + timedelta(seconds=5)
+                    job.claimed_until = None
+                    job.error_code = "waiting_for_previous_operator_reply"
+                    return
             connection_id = conn.id
             chat_id = conv.chat_id
             menu_id = conv.menu_message_id
@@ -479,9 +572,54 @@ class Processor:
             job.claimed_until = None
             if kind in ("menu", "handoff") and conv.revision == job.revision:
                 conv.menu_message_id = message_id
+            if kind == "human":
+                # Only a confirmed Telegram send can satisfy the first-response SLA.
+                ticket = session.scalar(select(Ticket).where(
+                    Ticket.conversation_id == conv.id,
+                    Ticket.status.in_(("open", "in_progress")),
+                ).order_by(Ticket.id.desc()).limit(1))
+                if ticket is not None:
+                    ticket.first_response_at = ticket.first_response_at or utcnow()
+                    ticket.status = "in_progress"
+                    ticket.updated_at = utcnow()
             if kind not in ("alert", "alert_photo"):
                 session.add(Message(conversation_id=conv.id, telegram_message_id=None,
                                     direction="out", kind=kind, content=redact(text)))
+
+    def check_sla(self) -> bool:
+        """Escalate overdue, unanswered tickets at most once."""
+        with session_scope(self.factory) as session:
+            now = utcnow()
+            ticket = session.scalar(select(Ticket).where(
+                Ticket.status.in_(("open", "in_progress")),
+                Ticket.first_response_at.is_(None),
+                Ticket.escalated_at.is_(None),
+                Ticket.sla_due_at.is_not(None),
+                Ticket.sla_due_at <= now,
+            ).order_by(Ticket.sla_due_at, Ticket.id).limit(1).with_for_update(
+                skip_locked=True,
+            ))
+            if ticket is None:
+                return False
+            ticket.escalated_at = now
+            ticket.priority = "urgent"
+            ticket.updated_at = now
+            session.add(Audit(
+                conversation_id=ticket.conversation_id, actor="system",
+                action="ticket_sla_escalation", detail=str(ticket.id),
+            ))
+            if self.settings.support_alert_chat_id:
+                conv = session.get(Conversation, ticket.conversation_id)
+                session.add(Outbox(
+                    conversation_id=ticket.conversation_id,
+                    revision=conv.revision,
+                    kind="alert",
+                    text=f"🚨 Support SLA breached: ticket #{ticket.id} "
+                         f"(chat {conv.chat_id}, reason {ticket.reason}). "
+                         f"Review /admin/conversations/{conv.id}",
+                    buttons=[],
+                ))
+            return True
 
     def tick(self) -> bool:
         with session_scope(self.factory) as session:
@@ -509,7 +647,7 @@ class Processor:
         if outbox_id is not None:
             self.delivery(outbox_id)
             return True
-        return False
+        return self.check_sla()
 
     def heartbeat(self) -> None:
         with session_scope(self.factory) as session:
@@ -523,10 +661,29 @@ class Processor:
     def run(self):
         log.info("ReplyForge worker started")
         next_heartbeat = 0.0
+        next_privacy_sweep = 0.0
+        next_sla_sweep = 0.0
         while True:
-            if time.monotonic() >= next_heartbeat:
+            now = time.monotonic()
+            if now >= next_sla_sweep:
+                try:
+                    # SLA checks must not starve when new events continuously arrive.
+                    self.check_sla()
+                except Exception:
+                    log.exception("SLA periodic sweep failed")
+                next_sla_sweep = now + 30
+            if now >= next_heartbeat:
                 self.heartbeat()
-                next_heartbeat = time.monotonic() + 15
+                next_heartbeat = now + 15
+            if now >= next_privacy_sweep:
+                try:
+                    with session_scope(self.factory) as db:
+                        counts = prune_history(db, self.settings.retention_days)
+                    if any(counts.values()):
+                        log.info("Privacy retention scrub complete: %s", counts)
+                except Exception:
+                    log.exception("Privacy retention scrub failed")
+                next_privacy_sweep = now + 6 * 3600
             if not self.tick():
                 time.sleep(self.settings.poll_seconds)
 

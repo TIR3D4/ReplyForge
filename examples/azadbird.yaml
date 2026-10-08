@@ -1,4 +1,9 @@
 brand: پرنده آزاد | پشتیبانی
+support_sla_minutes: 30
+support_priorities:
+  payment: high
+  delivery: high
+  connection: normal
 locale: fa
 welcome: "سلام 🌿 به پشتیبانی پرنده آزاد خوش اومدی. موضوع رو انتخاب کن یا مشکلت رو بنویس."
 handoff_text: "درخواستت ثبت شد و برای پشتیبان انسانی فرستاده شد. لطفاً منتظر بررسی بمون."
