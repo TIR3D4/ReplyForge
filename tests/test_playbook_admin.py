@@ -45,3 +45,35 @@ workflows: {}
         assert "Integration Shop" in client.get("/admin", auth=auth).text
         assert client.post("/admin/playbook", auth=auth,
                            data={"source": "brand: Invalid", "csrf_token": csrf}).status_code == 422
+
+
+def test_no_code_menu_customization(database, test_settings, fake_telegram):
+    app = build_app(test_settings, factory=database, telegram=fake_telegram)
+    auth = (test_settings.admin_username, test_settings.admin_password)
+    csrf = hmac.new(test_settings.binding_pepper.encode(),
+                    b"replyforge-admin-csrf", hashlib.sha256).hexdigest()
+    with TestClient(app) as client:
+        body = {
+            "csrf_token": csrf,
+            "brand": "New Support Co",
+            "locale": "fa",
+            "welcome": "سلام مشتری عزیز",
+            "handoff_text": "منتظر اپراتور باشید",
+            "resolution_text": "مشکل حل شد",
+            "menu_label": ["👤 اپراتور", "📦 سفارش", ""],
+            "menu_action": ["human", "flow:delivery", "human"],
+        }
+        response = client.post("/admin/playbook/basic", auth=auth,
+                               data=body, follow_redirects=False)
+        assert response.status_code == 303, response.text
+        panel = client.get("/admin/playbook", auth=auth)
+        assert "New Support Co" in panel.text
+        with session_scope(database) as session:
+            version = session.scalar(select(PlaybookVersion))
+            assert version.active is True
+            from replyforge.config import parse_playbook_yaml
+            config = parse_playbook_yaml(version.source)
+            assert config["locale"] == "fa"
+            assert len(config["menu"]) == 2
+        body["menu_action"] = ["human", "flow:not_defined", "human"]
+        assert client.post("/admin/playbook/basic", auth=auth, data=body).status_code == 422
