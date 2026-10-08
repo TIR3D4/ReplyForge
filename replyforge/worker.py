@@ -288,7 +288,7 @@ class Processor:
                 .get(conv.step, {}).get("input") == "photo"
         )
         # Financial/payment evidence is NEVER sent to third-party vision APIs.
-        if (file_id and not photo_expected and conv.workflow != "payment"
+        if (file_id and not photo_expected and conv.workflow == "connection"
                 and self.settings.vision_enabled):
             try:
                 content = self.telegram.download(str(file_id), self.settings.media_max_bytes)
