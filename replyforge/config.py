@@ -42,7 +42,8 @@ class Settings:
 
     @classmethod
     def from_env(cls, *, strict: bool = True) -> "Settings":
-        g = lambda name, default="": os.getenv(name, default).strip()
+        def g(name: str, default: str = "") -> str:
+            return os.getenv(name, default).strip()
         obj = cls(
             bot_token=g("BOT_TOKEN"),
             webhook_secret=g("WEBHOOK_SECRET"),
