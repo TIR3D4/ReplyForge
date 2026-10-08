@@ -99,3 +99,5 @@ The CI workflow checks compilation and unit/integration tests with mock Telegram
 ## License
 
 Apache-2.0. Contributions are welcome. Read SECURITY.md before reporting vulnerabilities.
+
+To keep newly issued subscriptions available without manual imports, enable the **optional** isolated sync process with `docker compose --profile vpn up -d catalog`. It runs once per hour by default, only reads the configured panel APIs, and keeps a last-sync status. Its errors do not stop Telegram support processing. Require the real panel versions to pass a staging import before enabling.
