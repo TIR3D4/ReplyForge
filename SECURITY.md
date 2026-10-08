@@ -36,3 +36,16 @@ Trusted Marzban/Pasarguard admin APIs may be used to list existing users. Only H
 ## Staged activation and operator control
 
 New installs default to monitor-only mode. The authenticated admin can pause automated customer replies immediately while leaving human replies available. Database worker heartbeats enable alerting when background processing fails. The Telegram Business reply time window is still enforced.
+
+
+## V1.1 reviewed drafts and knowledge extraction
+
+The operator reply assistant creates a **draft only**. Its output is not authorized to send as the Business account; an authenticated human must edit and submit it. Financial drafts avoid declaring a payment confirmed without trusted payment evidence. Resolution-derived knowledge candidates remain unpublished until explicit human approval. Never approve suggested FAQs containing personal customer information.
+
+Human-authored replies preserve FIFO order; later sends pause if an earlier send has an ambiguous outcome. Staff must reconcile ambiguous Telegram results before sending dependent messages.
+
+## Local erasure and external retention boundaries
+
+The authenticated erasure control requires exact confirmation and declines execution when a conversation has uncertain or in-flight outgoing delivery. It removes local conversation metadata, messages, tickets, notes, drafts, suggestions, related audit entries and chat-specific subscription bindings. It cannot erase Telegram message history, upstream panel data, third-party AI records or existing backup copies.
+
+DATA_RETENTION_DAYS defaults to 180 and controls scheduled content scrubbing of eligible historical messages, media references, staff notes, AI drafts, unreviewed knowledge candidates and completed ticket summaries. This preserves operational row structure and is not equivalent to deletion of every user identifier or every backup copy. Deployers remain responsible for informed consent and privacy compliance.

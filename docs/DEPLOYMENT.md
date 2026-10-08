@@ -97,3 +97,14 @@ After verifying both panel APIs and rate limits, run `docker compose --profile v
 ## Privacy retention
 
 DATA_RETENTION_DAYS defaults to 180 (0 disables). The worker periodically scrubs old support text and Telegram file references in bounded batches. Run `docker compose exec api replyforge prune` for an operator-triggered pass. Note that retention does not erase backups, external AI provider records or accounts in Marzban/Pasarguard. Document retention and deletion policies before collecting customer data.
+
+
+## ReplyForge 1.1 upgrade and first-response SLA
+
+Read the step-by-step [upgrade guide](UPGRADE_V1_1.md). This release applies schema migrations 0005 through 0007 using the Compose init service. A database backup and staging restore test are required before a live migration.
+
+Customer messages may be coalesced over MESSAGE_DEBOUNCE_MS; maintain only one worker. A queued operator reply is not counted as the first response until Telegram confirms delivery. The worker periodically checks unanswered SLAs independently from ongoing queue work.
+
+Optional: DATA_RETENTION_DAYS (default 180) scrubs older messages, attachment IDs, ticket notes, draft replies and completed ticket summaries. The administrator can invoke 'replyforge prune' to trigger a pass. This does not erase upstream Telegram history, provider logs, VPN panel accounts or previously exported backups.
+
+Use /admin/tickets for staff triage, /admin/knowledge/review for knowledge approval and /admin/conversations/<id> for human-only AI suggestions and explicitly confirmed local privacy erasure. Do not enable automated replies to real clients before completing [the live acceptance checklist](SMOKE_TEST.md).
