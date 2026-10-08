@@ -310,7 +310,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             raise HTTPException(status_code=502, detail="Telegram media unavailable") from exc
         if data.startswith(bytes.fromhex("ffd8ff")):
             mime = "image/jpeg"
-        if data.startswith(bytes.fromhex("ffd8ff")):
+        elif data.startswith(bytes.fromhex("89504e470d0a1a0a")):
             mime = "image/png"
         elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
             mime = "image/webp"
