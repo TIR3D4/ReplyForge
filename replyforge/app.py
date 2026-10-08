@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import hashlib
 import hmac
+from datetime import timedelta
 from copy import deepcopy
 import yaml
 from pathlib import Path
@@ -128,7 +129,13 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         try:
             with session_scope(request.app.state.factory) as session:
                 if session.get(Event, update_id) is None:
-                    session.add(Event(update_id=update_id, payload=payload))
+                    # Hold a short burst before intent classification. All inbound
+                    # Business updates share the delay to preserve event order.
+                    delay_ms = s.message_debounce_ms if "business_message" in payload else 0
+                    session.add(Event(
+                        update_id=update_id, payload=payload,
+                        available_at=utcnow() + timedelta(milliseconds=delay_ms),
+                    ))
         except IntegrityError:
             pass  # Concurrent duplicate delivery, unique update_id already committed.
         callback = payload.get("callback_query") or {}

@@ -9,7 +9,7 @@ ReplyForge is a **self-hosted, open-source Telegram Business support system** th
 ## V1 support hardening — release candidate
 
 - Official Telegram Business connection, including Business permission updates, callbacks, manual-owner takeover, edited/deleted message handling.
-- Compact one/two-column inline menu with editing instead of spamming new messages. Stale callbacks are rejected, and handoff edits clear old buttons.
+- Compact one/two-column inline menu with editing instead of spamming new messages. Consecutive inbound texts can be batched using MESSAGE_DEBOUNCE_MS to avoid multiple AI calls. Stale callbacks are rejected, and handoff edits clear old buttons.
 - Durable PostgreSQL inbox/outbox, idempotent incoming update IDs, safe unknown-delivery handling, and event retry limits.
 - Configurable YAML menus and **multi-step workflows**: ask for a choice, reference, image, question, subscription link; close or hand off.
 - Optional AI intent/choice recognition, semantic selection among approved FAQs, opt-in screenshot reading and opt-in voice transcription with strict file-size and daily model budgets. Rule-driven workflows continue when the model is unavailable.

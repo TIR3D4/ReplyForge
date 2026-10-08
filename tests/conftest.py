@@ -16,6 +16,7 @@ def test_settings(tmp_path, monkeypatch):
         Settings.from_env(strict=False),
         bot_token="fake-token",
         auto_reply_enabled=True,
+        message_debounce_ms=0,
         business_config="examples/azadbird.yaml",
         database_url="sqlite+pysqlite:///" + str(tmp_path / "replyforge.db"),
     )

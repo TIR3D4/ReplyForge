@@ -23,6 +23,9 @@ from .workflow import (
 
 log = logging.getLogger(__name__)
 
+MAX_TEXT_BATCH = 8
+MAX_BATCH_CHARACTERS = 2400
+
 REPLY_WINDOW = timedelta(hours=23, minutes=50)
 
 
@@ -145,7 +148,8 @@ class Processor:
 
         return AIEngine(self.settings, allow_call=permit_call)
 
-    def _process_payload(self, session: Session, payload: dict) -> None:
+    def _process_payload(self, session: Session, payload: dict,
+                         *, batch_messages: list[dict] | None = None) -> None:
         if "business_connection" in payload:
             update_connection(session, payload["business_connection"])
             return
@@ -251,6 +255,12 @@ class Processor:
             return
         if not record_inbound(session, conv, message):
             return
+        # Persist each constituent message independently. Only the prompt/context
+        # is combined; Telegram message IDs and attachments remain traceable.
+        accepted_messages = [message]
+        for item in batch_messages or []:
+            if record_inbound(session, conv, item):
+                accepted_messages.append(item)
         if conv.owner != "ai" or not conn.can_reply or not auto_reply_enabled(session, self.settings):
             if conv.owner in ("human", "human_pending"):
                 self._queue_human_followup(session, conv, message)
@@ -260,7 +270,10 @@ class Processor:
         file_id = photo[-1].get("file_id") if photo else (
             document.get("file_id") if str(document.get("mime_type", "")).startswith("image/") else None
         )
-        text = message.get("text") or message.get("caption") or ""
+        text = "\n".join(
+            str(item.get("text") or item.get("caption") or "")
+            for item in accepted_messages
+        )[:MAX_BATCH_CHARACTERS]
         ai = self._agent(session, conv)
         voice = message.get("voice") or message.get("audio") or {}
         if isinstance(voice, dict) and voice.get("file_id"):
@@ -382,15 +395,59 @@ class Processor:
                         buttons=[{"file_id": file_id}],
                     ))
 
+    @staticmethod
+    def _batchable(msg: dict) -> bool:
+        return (isinstance(msg, dict) and isinstance(msg.get("text"), str)
+                and bool(msg["text"].strip()) and isinstance(msg.get("from"), dict)
+                and isinstance(msg["from"].get("id"), int)
+                and not any(msg.get(k) for k in (
+                    "voice", "audio", "photo", "document", "video",
+                    "sender_business_bot",
+                )))
+
     def process_event(self, update_id: int) -> None:
         with session_scope(self.factory) as session:
             event = session.get(Event, update_id)
             if not event or event.status != "processing":
                 return
-            self._process_payload(session, event.payload)
-            event.status = "done"
-            event.payload = {}  # short-lived inbound secrets never remain in event queue
-            event.claimed_until = None
+            source = event.payload.get("business_message")
+            merged: list[Event] = []
+            combined: list[dict] = []
+            if self.settings.message_debounce_ms and self._batchable(source):
+                key = (source.get("business_connection_id"),
+                       (source.get("chat") or {}).get("id"),
+                       source["from"]["id"])
+                conn = session.get(BusinessConnection, key[0])
+                # Owner-authored replies must each be processed as takeover,
+                # never coalesced with a customer message or discarded.
+                if key[2] != (conn.owner_user_id if conn else None):
+                    next_events = session.scalars(select(Event).where(
+                        Event.status == "pending",
+                        Event.update_id > update_id,
+                    ).order_by(Event.update_id).limit(MAX_TEXT_BATCH).with_for_update(
+                        skip_locked=True,
+                    )).all()
+                    total = len(source["text"])
+                    for next_event in next_events:
+                        incoming = (next_event.payload or {}).get("business_message")
+                        if not self._batchable(incoming):
+                            break
+                        actual = (incoming.get("business_connection_id"),
+                                  (incoming.get("chat") or {}).get("id"),
+                                  incoming["from"]["id"])
+                        count = len(incoming["text"])
+                        if actual != key or total + count > MAX_BATCH_CHARACTERS:
+                            break  # Preserve event ordering across customers/media.
+                        merged.append(next_event)
+                        combined.append(incoming)
+                        total += count
+                        if len(merged) >= MAX_TEXT_BATCH - 1:
+                            break
+            self._process_payload(session, event.payload, batch_messages=combined)
+            for completed in [event, *merged]:
+                completed.status = "done"
+                completed.payload = {}  # never retain raw subscription links in a completed event
+                completed.claimed_until = None
 
     def delivery(self, outbox_id: int):
         with session_scope(self.factory) as session:

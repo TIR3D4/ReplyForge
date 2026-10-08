@@ -29,6 +29,7 @@ class Settings:
     webhook_public_url: str
     webhook_path: str
     poll_seconds: float
+    message_debounce_ms: int
     max_llm_calls_per_chat_per_day: int
     auto_reply_enabled: bool
     vision_enabled: bool
@@ -64,6 +65,7 @@ class Settings:
             webhook_public_url=g("WEBHOOK_PUBLIC_URL"),
             webhook_path=g("WEBHOOK_PATH", "/telegram/webhook"),
             poll_seconds=float(g("WORKER_POLL_SECONDS", "1")),
+            message_debounce_ms=int(g("MESSAGE_DEBOUNCE_MS", "1200")),
             max_llm_calls_per_chat_per_day=int(g("MAX_LLM_CALLS_PER_CHAT_PER_DAY", "40")),
             auto_reply_enabled=g("AUTO_REPLY_ENABLED", "false").lower() == "true",
             vision_enabled=g("AI_VISION_ENABLED", "false").lower() == "true",
@@ -102,6 +104,8 @@ class Settings:
             raise ConfigError("AI_MEDIA_MAX_BYTES must be 64KB–10MB")
         if obj.max_llm_calls_per_chat_per_day < 0:
             raise ConfigError("MAX_LLM_CALLS_PER_CHAT_PER_DAY cannot be negative")
+        if not 0 <= obj.message_debounce_ms <= 5000:
+            raise ConfigError("MESSAGE_DEBOUNCE_MS must be between 0 and 5000")
         if obj.poll_seconds <= 0 or obj.lease_seconds < 20:
             raise ConfigError("Invalid worker intervals")
         if obj.webhook_path != "/telegram/webhook":
