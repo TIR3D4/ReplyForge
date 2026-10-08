@@ -66,6 +66,10 @@ class TelegramClient:
         return self.call("sendMessage", {"chat_id": chat_id, "text": text[:4000],
                                          "link_preview_options": {"is_disabled": True}})
 
+    def send_photo_admin(self, chat_id: int, file_id: str, caption: str):
+        return self.call("sendPhoto", {"chat_id": chat_id, "photo": file_id,
+                                       "caption": caption[:1024]})
+
     def edit(self, connection_id: str, chat_id: int, message_id: int, text: str, markup=None):
         data = {
             "business_connection_id": connection_id, "chat_id": chat_id,

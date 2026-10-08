@@ -34,6 +34,7 @@ class FakeTelegram:
         self.edited = []
         self.acks = []
         self.admin_alerts = []
+        self.admin_photos = []
 
     def send(self, connection_id, chat_id, text, markup=None):
         self.sent.append((connection_id, chat_id, text, markup))
@@ -42,6 +43,10 @@ class FakeTelegram:
     def send_admin(self, chat_id, text):
         self.admin_alerts.append((chat_id, text))
         return {"message_id": 300 + len(self.admin_alerts)}
+
+    def send_photo_admin(self, chat_id, file_id, caption):
+        self.admin_photos.append((chat_id, file_id, caption))
+        return {"message_id": 600 + len(self.admin_photos)}
 
     def edit(self, connection_id, chat_id, message_id, text, markup=None):
         self.edited.append((connection_id, chat_id, message_id, text, markup))

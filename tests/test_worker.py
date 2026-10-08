@@ -114,3 +114,37 @@ def test_human_escalation_creates_operator_alert(database, test_settings, fake_t
         assert db.scalar(select(Conversation)).owner == "human_pending"
         outbound = db.scalars(select(Message).where(Message.direction == "out")).all()
         assert len(outbound) == 1  # alert must not appear in customer history
+
+
+def test_receipt_evidence_is_forwarded_to_operator(database, test_settings, fake_telegram):
+    from dataclasses import replace
+    from replyforge.workflow import start_flow
+    from replyforge.agent import AIEngine
+    from replyforge.config import load_playbook
+    settings = replace(test_settings, support_alert_chat_id=555001)
+    seed(database)
+    worker = Processor(settings, database, fake_telegram)
+    # Customer is at the receipt-photo step of the payment workflow.
+    with session_scope(database) as db:
+        conv = Conversation(business_connection_id="bc", chat_id=1001, state={})
+        db.add(conv)
+        db.flush()
+        start_flow(db, conv, worker.playbook, AIEngine(settings), settings, "payment")
+        conv.step = "proof"
+    with session_scope(database) as db:
+        db.add(Event(update_id=12, status="processing", payload={
+            "update_id": 12,
+            "business_message": {
+                "business_connection_id": "bc", "chat": {"id": 1001},
+                "message_id": 12, "from": {"id": 1001},
+                "photo": [{"file_id": "safe-tg-file-id"}],
+            },
+        }))
+    worker.process_event(12)
+    assert worker.tick()  # customer handoff message
+    assert worker.tick()  # operator text alert
+    assert worker.tick()  # attached receipt image
+    assert len(fake_telegram.admin_photos) == 1
+    assert fake_telegram.admin_photos[0][1] == "safe-tg-file-id"
+    with session_scope(database) as db:
+        assert len(db.scalars(select(Message).where(Message.direction == "out")).all()) == 1

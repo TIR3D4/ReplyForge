@@ -240,6 +240,16 @@ class Processor:
                 f"Review in /admin/conversations/{conv.id}",
                 buttons=[],
             ))
+            latest_photo = session.scalar(select(Message).where(
+                Message.conversation_id == conv.id, Message.direction == "in",
+                Message.kind == "photo",
+            ).order_by(Message.id.desc()).limit(1))
+            if latest_photo and latest_photo.data.get("file_id"):
+                session.add(Outbox(
+                    conversation_id=conv.id, revision=conv.revision,
+                    kind="alert_photo", text=f"📎 Evidence for ticket #{ticket.id}",
+                    buttons=[{"file_id": latest_photo.data["file_id"]}],
+                ))
 
     def process_event(self, update_id: int) -> None:
         with session_scope(self.factory) as session:
@@ -258,7 +268,7 @@ class Processor:
                 return
             conv = session.get(Conversation, job.conversation_id)
             conn = session.get(BusinessConnection, conv.business_connection_id)
-            is_alert = job.kind == "alert"
+            is_alert = job.kind in ("alert", "alert_photo")
             if (conv.revision != job.revision or
                     (not is_alert and (not conn.enabled or not conn.can_reply
                     or not conv.last_inbound_at or (utcnow() - _aware(conv.last_inbound_at)) >= REPLY_WINDOW
@@ -279,6 +289,14 @@ class Processor:
                 if self.settings.support_alert_chat_id is None:
                     raise TelegramError("operator_alert_not_configured", status=400)
                 result = self.telegram.send_admin(self.settings.support_alert_chat_id, text)
+                message_id = result["message_id"]
+            elif kind == "alert_photo":
+                if self.settings.support_alert_chat_id is None:
+                    raise TelegramError("operator_alert_not_configured", status=400)
+                file_id = (job.buttons or [{}])[0].get("file_id")
+                if not file_id:
+                    raise TelegramError("missing_photo_id", status=400)
+                result = self.telegram.send_photo_admin(self.settings.support_alert_chat_id, file_id, text)
                 message_id = result["message_id"]
             elif kind == "menu" and menu_id:
                 try:
@@ -322,7 +340,7 @@ class Processor:
             job.claimed_until = None
             if kind == "menu" and conv.revision == job.revision:
                 conv.menu_message_id = message_id
-            if kind != "alert":
+            if kind not in ("alert", "alert_photo"):
                 session.add(Message(conversation_id=conv.id, telegram_message_id=None,
                                     direction="out", kind=kind, content=redact(text)))
 
