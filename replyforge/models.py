@@ -104,6 +104,17 @@ class TicketNote(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class OperatorDraft(Base):
+    """Unsent, human-reviewed AI suggestion with explicit provenance."""
+    __tablename__ = "operator_drafts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(Integer, ForeignKey("conversations.id"), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="suggested", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Knowledge(Base):
     __tablename__ = "knowledge"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -135,6 +146,7 @@ Index("idx_outbox_queue", Outbox.status, Outbox.available_at)
 Index("idx_tickets_status", Ticket.status, Ticket.created_at)
 Index("idx_tickets_sla", Ticket.status, Ticket.first_response_at, Ticket.sla_due_at)
 Index("idx_ticket_notes", TicketNote.ticket_id, TicketNote.created_at)
+Index("idx_drafts_conversation", OperatorDraft.conversation_id, OperatorDraft.status)
 
 
 class PlaybookVersion(Base):
