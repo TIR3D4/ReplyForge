@@ -96,6 +96,7 @@ class Binding(Base):
     __tablename__ = "subscription_bindings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     link_hmac: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    token_hmac: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     provider: Mapped[str] = mapped_column(String(24), nullable=False)
     user_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     label: Mapped[str] = mapped_column(String(255), default="")
