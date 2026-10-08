@@ -21,8 +21,9 @@ from sqlalchemy.exc import IntegrityError
 
 from .config import ConfigError, Settings, load_playbook
 from .database import session_factory, session_scope
+from .agent import AIEngine
 from .models import (
-    Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, Message, Outbox, Ticket, TicketNote, utcnow
+    Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, Message, Outbox, Ticket, TicketNote, OperatorDraft, utcnow
 )
 from .security import constant_time_equal, fingerprint, redact, subscription_token_fingerprint
 from .playbooks import active_version, activate_version, effective_playbook, save_playbook
@@ -357,6 +358,10 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             outbound = session.scalars(select(Outbox).where(Outbox.conversation_id == conversation_id,
                 Outbox.kind == "human").order_by(Outbox.id.desc()).limit(20)).all()
             current, _version = effective_playbook(session, request.app.state.playbook)
+            draft = session.scalar(select(OperatorDraft).where(
+                OperatorDraft.conversation_id == conv.id,
+                OperatorDraft.status == "suggested",
+            ).order_by(desc(OperatorDraft.id)).limit(1))
             ticket = session.scalar(select(Ticket).where(
                 Ticket.conversation_id == conv.id,
             ).order_by(desc(Ticket.id)).limit(1))
@@ -365,7 +370,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             ).order_by(desc(TicketNote.id)).limit(60)).all() if ticket else []
             return templates.TemplateResponse(request, "conversation.html", {
                 "conv": conv, "messages": list(reversed(messages)), "outbound": outbound,
-                "ticket": ticket, "notes": notes,
+                "ticket": ticket, "notes": notes, "draft": draft,
                 "csrf": csrf_value(request),
                 "locale": current.get("locale", "en"),
                 "_": lambda en, fa: fa if current.get("locale") == "fa" else en,
@@ -497,9 +502,96 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             session.add(Audit(actor="admin", action="automation_toggle", detail=enabled))
         return RedirectResponse("/admin", status_code=303)
 
+
+    @app.post("/admin/conversations/{conversation_id}/suggest")
+    def suggest_operator_reply(
+        request: Request, conversation_id: int,
+        csrf_token: str = Form(...), _=Depends(authenticate),
+    ):
+        """Operator-only, cost-bounded draft; deliberately never sends to Telegram."""
+        csrf(request, csrf_token)
+        with session_scope(request.app.state.factory) as session:
+            conv = session.get(Conversation, conversation_id)
+            if conv is None:
+                raise HTTPException(404, detail="Conversation not found")
+            history = list(reversed(session.scalars(select(Message).where(
+                Message.conversation_id == conversation_id,
+            ).order_by(desc(Message.id)).limit(12)).all()))
+            knowledge = session.scalars(select(Knowledge).where(
+                Knowledge.enabled.is_(True),
+            ).order_by(Knowledge.id).limit(50)).all()
+            ticket = session.scalar(select(Ticket).where(
+                Ticket.conversation_id == conversation_id,
+                Ticket.status.in_(("open", "in_progress")),
+            ).order_by(desc(Ticket.id)).limit(1))
+            locale = effective_playbook(
+                session, request.app.state.playbook,
+            )[0].get("locale", "en")
+            settings = request.app.state.settings
+
+            def allow_call():
+                if not settings.ai_api_key:
+                    return False
+                cutoff = utcnow() - timedelta(days=1)
+                used = session.scalar(select(func.count(Audit.id)).where(
+                    Audit.conversation_id == conversation_id,
+                    Audit.action == "ai_call",
+                    Audit.created_at >= cutoff,
+                )) or 0
+                if used >= settings.max_llm_calls_per_chat_per_day:
+                    return False
+                session.add(Audit(conversation_id=conversation_id,
+                                  actor="system", action="ai_call"))
+                session.flush()
+                return True
+
+            ai = AIEngine(settings, allow_call=allow_call)
+            proposed, source = ai.operator_draft(
+                history, knowledge, locale=locale,
+                ticket_reason=ticket.category if ticket else "",
+            )
+            if not proposed.strip():
+                raise HTTPException(503, detail="Draft unavailable")
+            for previous in session.scalars(select(OperatorDraft).where(
+                OperatorDraft.conversation_id == conversation_id,
+                OperatorDraft.status == "suggested",
+            )).all():
+                previous.status = "superseded"
+            session.add(OperatorDraft(
+                conversation_id=conversation_id, text=proposed,
+                source=source, status="suggested",
+            ))
+            session.add(Audit(conversation_id=conversation_id, actor="operator",
+                              action="operator_draft_requested", detail=source))
+        return RedirectResponse("/admin/conversations/" + str(conversation_id),
+                                status_code=303)
+
+    @app.post("/admin/conversations/{conversation_id}/draft/{draft_id}/dismiss")
+    def dismiss_operator_draft(
+        request: Request, conversation_id: int, draft_id: int,
+        csrf_token: str = Form(...), _=Depends(authenticate),
+    ):
+        csrf(request, csrf_token)
+        with session_scope(request.app.state.factory) as session:
+            draft = session.scalar(select(OperatorDraft).where(
+                OperatorDraft.id == draft_id,
+                OperatorDraft.conversation_id == conversation_id,
+            ).with_for_update())
+            if draft is None:
+                raise HTTPException(404, detail="Draft not found")
+            if draft.status != "suggested":
+                raise HTTPException(409, detail="Draft is no longer active")
+            draft.status = "dismissed"
+            session.add(Audit(conversation_id=conversation_id,
+                              actor="operator", action="operator_draft_dismissed",
+                              detail=str(draft_id)))
+        return RedirectResponse("/admin/conversations/" + str(conversation_id),
+                                status_code=303)
+
     @app.post("/admin/conversations/{conversation_id}/reply")
     def operator_reply(request: Request, conversation_id: int,
                        message: str = Form(...), csrf_token: str = Form(...),
+                       draft_id: int | None = Form(None),
                        _=Depends(authenticate)):
         csrf(request, csrf_token)
         if not message.strip() or len(message) > 3500:
@@ -514,6 +606,14 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 raise HTTPException(status_code=409, detail="Telegram Business reply permission unavailable")
             if not conv.last_inbound_at or utcnow() - _aware(conv.last_inbound_at) >= REPLY_WINDOW:
                 raise HTTPException(status_code=409, detail="Telegram Business reply window expired")
+            if draft_id is not None:
+                draft = session.scalar(select(OperatorDraft).where(
+                    OperatorDraft.id == draft_id,
+                    OperatorDraft.conversation_id == conversation_id,
+                ).with_for_update())
+                if draft is None or draft.status != "suggested":
+                    raise HTTPException(409, detail="Draft expired, dismissed or sent")
+                draft.status = "sent"  # user may edit text before sending
             conv.owner = "human"
             conv.revision += 1
             ticket = session.scalar(select(Ticket).where(
