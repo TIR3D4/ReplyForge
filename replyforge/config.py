@@ -109,9 +109,19 @@ def settings() -> Settings:
     return Settings.from_env()
 
 
+def parse_playbook_yaml(source: str) -> dict[str, Any]:
+    try:
+        config = yaml.safe_load(source)
+    except yaml.YAMLError as exc:
+        raise ConfigError("Invalid YAML syntax") from exc
+    return validate_playbook(config)
+
+
 def load_playbook(path: str | Path) -> dict[str, Any]:
-    with Path(path).open(encoding="utf-8") as file:
-        config = yaml.safe_load(file)
+    return parse_playbook_yaml(Path(path).read_text(encoding="utf-8"))
+
+
+def validate_playbook(config: Any) -> dict[str, Any]:
     if not isinstance(config, dict):
         raise ConfigError("Playbook must be a mapping")
     if not isinstance(config.get("brand"), str) or not config["brand"]:
@@ -124,6 +134,8 @@ def load_playbook(path: str | Path) -> dict[str, Any]:
         if not isinstance(button, dict) or not button.get("label") or not button.get("action"):
             raise ConfigError("Menu buttons require label and action")
         action = button["action"]
+        if not isinstance(action, str):
+            raise ConfigError("Menu action must be a string")
         if action != "human" and not (action.startswith("flow:") and action[5:] in workflows):
             raise ConfigError("Invalid menu action: " + str(action))
     for name, flow in workflows.items():
@@ -138,7 +150,14 @@ def load_playbook(path: str | Path) -> dict[str, Any]:
             destination = state.get("next")
             if destination is not None and destination not in states:
                 raise ConfigError("Invalid next state " + str(destination))
-            for option in state.get("options", []):
+            options = state.get("options", [])
+            if not isinstance(options, list):
+                raise ConfigError("Options must be a list")
+            if state.get("input") == "choice" and not options:
+                raise ConfigError("Choice state requires options")
+            for option in options:
+                if not isinstance(option, dict) or "label" not in option or "value" not in option:
+                    raise ConfigError("Choice options require label and value")
                 target = option.get("next", destination)
                 if target not in states:
                     raise ConfigError("Invalid option next " + str(target))

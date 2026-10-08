@@ -113,3 +113,11 @@ class Audit(Base):
 Index("idx_event_queue", Event.status, Event.available_at)
 Index("idx_outbox_queue", Outbox.status, Outbox.available_at)
 Index("idx_tickets_status", Ticket.status, Ticket.created_at)
+
+
+class PlaybookVersion(Base):
+    __tablename__ = "playbook_versions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
