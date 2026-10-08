@@ -50,7 +50,7 @@ def test_enable_ai_from_admin_and_pause_again(database, test_settings, fake_tele
     _seed(database)
     app = build_app(settings, factory=database, telegram=fake_telegram)
     with TestClient(app) as client:
-        assert "Monitor-only" in client.get("/admin", auth=_auth(settings)).text
+        assert "حالت مشاهده" in client.get("/admin", auth=_auth(settings)).text
         response = client.post("/admin/automation", auth=_auth(settings), data={
             "enabled": "true", "csrf_token": _csrf(settings),
         }, follow_redirects=False)
