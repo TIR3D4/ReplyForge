@@ -240,16 +240,26 @@ class Processor:
                 f"Review in /admin/conversations/{conv.id}",
                 buttons=[],
             ))
-            latest_photo = session.scalar(select(Message).where(
+            from_date = (conv.state or {}).get("flow_started_at")
+            try:
+                boundary = datetime.fromisoformat(from_date) if from_date else utcnow() - timedelta(minutes=10)
+            except (ValueError, TypeError):
+                boundary = utcnow() - timedelta(minutes=10)
+            if boundary.tzinfo is None:
+                boundary = boundary.replace(tzinfo=timezone.utc)
+            # Limit evidence to images shared during this workflow, not historical files.
+            evidence = session.scalars(select(Message).where(
                 Message.conversation_id == conv.id, Message.direction == "in",
-                Message.kind == "photo",
-            ).order_by(Message.id.desc()).limit(1))
-            if latest_photo and latest_photo.data.get("file_id"):
-                session.add(Outbox(
-                    conversation_id=conv.id, revision=conv.revision,
-                    kind="alert_photo", text=f"📎 Evidence for ticket #{ticket.id}",
-                    buttons=[{"file_id": latest_photo.data["file_id"]}],
-                ))
+                Message.kind == "photo", Message.created_at >= boundary,
+            ).order_by(Message.id.desc()).limit(3)).all()
+            for index, message in enumerate(reversed(evidence), 1):
+                file_id = (message.data or {}).get("file_id")
+                if file_id:
+                    session.add(Outbox(
+                        conversation_id=conv.id, revision=conv.revision,
+                        kind="alert_photo", text=f"📎 Evidence {index} for ticket #{ticket.id}",
+                        buttons=[{"file_id": file_id}],
+                    ))
 
     def process_event(self, update_id: int) -> None:
         with session_scope(self.factory) as session:

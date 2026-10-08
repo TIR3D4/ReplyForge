@@ -64,11 +64,28 @@ workflows:
         options:
           - {label: "کمتر از ۵ دقیقه", value: under5, next: proof}
           - {label: "۵ تا ۱۵ دقیقه", value: medium, next: proof}
-          - {label: "بیشتر از ۱۵ دقیقه", value: over15, next: proof}
+          - {label: "بیشتر از ۱۵ دقیقه", value: over15, next: proof_late}
       proof:
-        prompt: "لطفاً عکس رسید رو بفرست. اطلاعات شخصی نامرتبط رو بپوشون. در صورت نیاز پشتیبان درباره پیامک برداشت راهنمایی می‌کنه."
+        prompt: "لطفاً عکس رسید رو بفرست و اطلاعات نامرتبط رو بپوشون تا پشتیبان بررسی کنه."
         input: photo
         field: receipt_file_id
+        next: human
+      proof_late:
+        prompt: "زمان زیادی گذشته. لطفاً عکس رسید رو بفرست تا پیگیری دقیق‌تری انجام بدیم."
+        input: photo
+        field: receipt_file_id
+        next: sms_question
+      sms_question:
+        prompt: "برای بررسی بیشتر، تصویر پیامک برداشت حساب رو هم داری؟ موجودی و اطلاعات حساس نامرتبط رو بپوشون."
+        input: choice
+        field: has_sms
+        options:
+          - {label: "📩 بله، ارسال می‌کنم", value: yes, next: sms}
+          - {label: "❌ ندارم", value: no, next: human}
+      sms:
+        prompt: "لطفاً تصویر پیامک برداشت رو بفرست. این مدرک به‌تنهایی اثبات واریز به فروشگاه نیست و پشتیبان بررسی می‌کنه."
+        input: photo
+        field: sms_file_id
         next: human
       human: {type: handoff}
   delivery:

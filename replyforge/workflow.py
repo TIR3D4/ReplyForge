@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import secrets
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -90,7 +91,7 @@ def start_flow(session: Session, conv: Conversation, playbook: dict, ai: AIEngin
         return root_menu(playbook)
     conv.workflow = name
     conv.step = flow["start"]
-    conv.state = {"answers": {}}
+    conv.state = {"answers": {}, "flow_started_at": datetime.now(timezone.utc).isoformat()}
     return _display_state(session, conv, playbook, ai, settings)
 
 

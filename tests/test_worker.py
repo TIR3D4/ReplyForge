@@ -148,3 +148,27 @@ def test_receipt_evidence_is_forwarded_to_operator(database, test_settings, fake
     assert fake_telegram.admin_photos[0][1] == "safe-tg-file-id"
     with session_scope(database) as db:
         assert len(db.scalars(select(Message).where(Message.direction == "out")).all()) == 1
+
+
+def test_long_payment_flow_requests_sms_before_handoff(database, test_settings):
+    from replyforge.agent import AIEngine
+    from replyforge.config import load_playbook
+    from replyforge.workflow import apply_action, accept_input
+    from replyforge.models import BusinessConnection
+    playbook = load_playbook("examples/azadbird.yaml")
+    with session_scope(database) as db:
+        db.add(BusinessConnection(id="flow", owner_user_id=10, enabled=True, can_reply=True))
+        db.flush()
+        c = Conversation(business_connection_id="flow", chat_id=19, state={})
+        db.add(c)
+        db.flush()
+        ai = AIEngine(test_settings)
+        apply_action(db, c, playbook, ai, test_settings, "flow:payment")
+        apply_action(db, c, playbook, ai, test_settings, "choose:over15")
+        assert c.step == "proof_late"
+        accept_input(db, c, playbook, ai, test_settings, "", "receipt-photo")
+        assert c.step == "sms_question"
+        apply_action(db, c, playbook, ai, test_settings, "choose:yes")
+        assert c.step == "sms"
+        accept_input(db, c, playbook, ai, test_settings, "", "sms-photo")
+        assert c.owner == "human_pending"
