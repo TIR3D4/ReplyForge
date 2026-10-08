@@ -36,6 +36,13 @@ class FakeTelegram:
         self.acks = []
         self.admin_alerts = []
         self.admin_photos = []
+        self.files = {}
+
+    def download(self, file_id, max_bytes):
+        data = self.files.get(file_id)
+        if data is None or len(data) > max_bytes:
+            raise ValueError("Media missing or too large")
+        return data
 
     def send(self, connection_id, chat_id, text, markup=None):
         self.sent.append((connection_id, chat_id, text, markup))
