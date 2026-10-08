@@ -1,0 +1,49 @@
+brand: ReplyForge Support
+locale: en
+welcome: "Hi! 👋 I'm your support assistant. Choose a topic or describe your question."
+handoff_text: "Your request is in the human support queue. A team member will review it."
+resolution_text: "Glad that helped! If you need anything else, send a new message."
+menu:
+  - {label: "📦 Order status", action: "flow:delivery"}
+  - {label: "💳 Billing", action: "flow:payment"}
+  - {label: "❓ General question", action: "flow:question"}
+  - {label: "👩‍💻 Human support", action: "human"}
+workflows:
+  delivery:
+    title: "📦 Order status"
+    start: reference
+    states:
+      reference:
+        prompt: "Please send your order reference (don't send passwords or bank card numbers)."
+        input: text
+        field: order_reference
+        next: human
+      human: {type: handoff}
+  payment:
+    title: "💳 Billing"
+    start: when
+    states:
+      when:
+        prompt: "How long has it been since you paid?"
+        input: choice
+        field: wait_time
+        options:
+          - {label: "Less than 5 minutes", value: recent, next: proof}
+          - {label: "5–15 minutes", value: medium, next: proof}
+          - {label: "Over 15 minutes", value: long, next: proof}
+      proof:
+        prompt: "Please send your payment receipt image. You may hide unrelated personal data."
+        input: photo
+        field: proof_file_id
+        next: human
+      human: {type: handoff}
+  question:
+    title: "❓ General question"
+    start: ask
+    states:
+      ask:
+        prompt: "Write your question. I'll search our approved knowledge base."
+        input: question
+        field: question
+        next: answer
+      answer: {type: knowledge}

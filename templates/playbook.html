@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}" dir="{{ 'rtl' if locale == 'fa' else 'ltr' }}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ReplyForge · Workflows</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif;background:#0b1120;color:#e7edff}
+*{box-sizing:border-box}body{max-width:1120px;padding:26px;margin:0 auto}
+a{color:#a6dfeb}h1{margin:14px 0 6px}p,small{color:#aebed4;line-height:1.6}
+.panel{background:#151f34;border:1px solid #31415e;padding:22px;border-radius:18px;margin:18px 0}
+textarea{font-family:ui-monospace,monospace;font-size:13px;line-height:1.5;
+border:1px solid #476077;background:#0b1525;color:#e8f1ff;width:100%;border-radius:12px;
+padding:16px;min-height:520px;resize:vertical;direction:ltr;text-align:left}
+input,select{background:#0b1525;color:#e8f1ff;border:1px solid #476077;border-radius:9px;padding:12px;width:100%;max-width:540px}
+.menu-row{display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:10px}
+textarea.small{min-height:90px;height:100px;width:100%;max-width:680px;direction:inherit;text-align:start;font-family:inherit}
+button{background:#12727a;border:0;color:white;border-radius:9px;padding:11px 16px;
+cursor:pointer;font-weight:600}button.secondary{background:#33425d}
+table{width:100%;border-collapse:collapse}td,th{text-align:start;border-bottom:1px solid #2a3953;padding:12px}
+form.inline{display:inline} .pill{border-radius:14px;padding:5px 10px;background:#1c625b}
+@media(max-width:600px){body{padding:12px}.panel{padding:13px}textarea{min-height:450px}}
+</style></head>
+<body>
+<a href="/admin">{{ '← داشبورد' if locale == 'fa' else '← Dashboard' }}</a>
+<h1>{{ 'ویرایش هوشمند منو و گردش‌کار' if locale == 'fa' else 'Support workflow editor' }}</h1>
+<p>{{ brand }} · {{ 'نسخه فعال' if locale == 'fa' else 'Active version' }}:
+<span class="pill">{{ version if version else 'file default' }}</span></p>
+<div class="panel">
+<h2>{{ 'شخصی‌سازی آسان' if locale == 'fa' else 'Quick customization' }}</h2>
+<p>{{ 'نام کسب‌وکار، پیام‌ها و دکمه‌های منو را بدون ویرایش کد تنظیم کن. برای افزودن گردش‌کار جدید از ویرایشگر YAML پایین استفاده کن.' if locale == 'fa' else 'Customize your brand, replies and menu buttons without code. Add new workflows with the advanced YAML editor below.' }}</p>
+<form method="post" action="/admin/playbook/basic">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<p><label>{{ 'نام کسب‌وکار' if locale == 'fa' else 'Business name' }}<br>
+<input name="brand" maxlength="100" value="{{ config.brand }}" required></label></p>
+<p><label>{{ 'زبان' if locale == 'fa' else 'Language' }}<br>
+<select name="locale">
+<option value="en" {% if locale == 'en' %}selected{% endif %}>English</option>
+<option value="fa" {% if locale == 'fa' %}selected{% endif %}>فارسی</option>
+</select></label></p>
+<p><label>{{ 'پیام خوش‌آمدگویی' if locale == 'fa' else 'Welcome message' }}<br>
+<textarea name="welcome" class="small" maxlength="1200" required>{{ config.welcome or '' }}</textarea></label></p>
+<p><label>{{ 'پیام ارجاع به انسان' if locale == 'fa' else 'Human handoff message' }}<br>
+<textarea name="handoff_text" class="small" maxlength="1200" required>{{ config.handoff_text or '' }}</textarea></label></p>
+<p><label>{{ 'پیام پایان موفق' if locale == 'fa' else 'Resolution message' }}<br>
+<textarea name="resolution_text" class="small" maxlength="1200" required>{{ config.resolution_text or '' }}</textarea></label></p>
+<h3>{{ 'دکمه‌های منو' if locale == 'fa' else 'Menu buttons' }}</h3>
+<p>{{ 'برای حذف دکمه، نامش را خالی کن. برای افزودن، از ردیف‌های خالی استفاده کن.' if locale == 'fa' else 'Clear a label to remove a button; use blank rows to add one.' }}</p>
+{% for item in config.menu %}
+<div class="menu-row">
+<input name="menu_label" maxlength="80" value="{{ item.label }}" aria-label="Menu button label">
+<select name="menu_action" aria-label="Menu action">
+<option value="human" {% if item.action == 'human' %}selected{% endif %}>Human support</option>
+{% for flow in flow_names %}<option value="flow:{{ flow }}" {% if item.action == 'flow:' ~ flow %}selected{% endif %}>{{ flow }}</option>{% endfor %}
+</select></div>
+{% endfor %}
+{% for index in range(3) %}
+<div class="menu-row">
+<input name="menu_label" maxlength="80" placeholder="{{ 'دکمه جدید' if locale == 'fa' else 'New button label' }}">
+<select name="menu_action"><option value="human">Human support</option>
+{% for flow in flow_names %}<option value="flow:{{ flow }}">{{ flow }}</option>{% endfor %}
+</select></div>
+{% endfor %}
+<p><button>{{ 'ذخیره و فعال‌سازی' if locale == 'fa' else 'Save and activate' }}</button></p>
+</form></div>
+<div class="panel">
+<h2>{{ 'پیکربندی YAML' if locale == 'fa' else 'YAML configuration' }}</h2>
+<p>{{ 'قبل از ذخیره اعتبارسنجی می‌شود؛ اگر نسخه فعلی تغییر کند، فرایندهای ناتمام برای جلوگیری از ناسازگاری به منوی اصلی برمی‌گردند.' if locale == 'fa' else 'Validated before saving. Existing workflows from a changed version return to the home menu.' }}</p>
+<form method="post" action="/admin/playbook">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<textarea name="source" spellcheck="false" maxlength="50000" required>{{ source }}</textarea>
+<p><button>{{ 'ذخیره و فعال‌سازی نسخه جدید' if locale == 'fa' else 'Validate, save and activate' }}</button></p>
+</form>
+</div>
+<div class="panel">
+<h2>{{ 'تاریخچه نسخه‌ها و بازگردانی' if locale == 'fa' else 'Version history and rollback' }}</h2>
+<table><thead><tr><th>Version</th><th>Created</th><th>State</th><th></th></tr></thead><tbody>
+{% for v in revisions %}
+<tr><td>#{{ v.id }}</td><td>{{ v.created_at }}</td>
+<td>{{ '✅ Active' if v.active else 'Archived' }}</td><td>
+{% if not v.active %}<form class="inline" method="post" action="/admin/playbook/{{ v.id }}/activate">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button class="secondary">{{ 'بازگردانی' if locale == 'fa' else 'Restore' }}</button>
+</form>{% endif %}
+</td></tr>
+{% else %}<tr><td colspan="4">{{ 'هنوز نسخه‌ای ذخیره نشده؛ تنظیمات پیش‌فرض فایل فعال است.' if locale == 'fa' else 'The file default is active. No saved revisions.' }}</td></tr>{% endfor %}
+</tbody></table>
+</div>
+<p>Documentation: <a href="https://github.com/TIR3D4/ReplyForge/blob/main/docs/WORKFLOWS.md">Support workflow schema</a></p>
+</body></html>

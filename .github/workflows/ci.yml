@@ -1,0 +1,58 @@
+name: CI
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: replyforge_test
+          POSTGRES_USER: replyforge
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U replyforge -d replyforge_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Syntax check
+        run: python -m compileall -q replyforge
+      - name: Static checks
+        run: ruff check --select E4,E7,E9,F replyforge
+      - name: Tests
+        run: pytest -q
+      - name: PostgreSQL integration
+        env:
+          TEST_POSTGRES_URL: postgresql+psycopg://replyforge:ci-only-password@localhost:5432/replyforge_test
+        run: pytest -q tests/test_postgres.py
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production container
+        run: docker build --tag replyforge-ci .
+      - name: Verify playbook is present
+        run: docker run --rm replyforge-ci replyforge check-config
+      - name: Exercise migration in container
+        run: |
+          docker run --rm \
+            -e BOT_TOKEN="123:ci-test" \
+            -e WEBHOOK_SECRET="01234567890123456789012345678900" \
+            -e ADMIN_PASSWORD="01234567890123456789" \
+            -e BINDING_PEPPER="01234567890123456789012345678900" \
+            -e INTERNAL_API_KEY="01234567890123456789012345678900" \
+            -e DATABASE_URL="sqlite+pysqlite:////tmp/replyforge-ci.db" \
+            replyforge-ci replyforge init
