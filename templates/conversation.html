@@ -19,6 +19,19 @@ button.secondary{background:#38455d}form{display:inline}
 <form method="post" action="/admin/conversations/{{ conv.id }}/resume">
 <input type="hidden" name="csrf_token" value="{{ csrf }}"><button>{{ _('Resume AI', 'بازگشت به AI') }}</button></form>
 </div>
+<section class="card">
+<h2>{{ _('Human operator reply', 'پاسخ اپراتور انسانی') }}</h2>
+<p>{{ _('Sending claims this chat for a human and checks business permissions.', 'با ارسال پاسخ، گفتگو به اپراتور واگذار می‌شود و مجوز تلگرام بررسی خواهد شد.') }}</p>
+<form method="post" action="/admin/conversations/{{ conv.id }}/reply" style="display:grid;gap:12px">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<textarea name="message" maxlength="3500" rows="4" required placeholder="{{ _('Write your message…', 'پیام را بنویسید…') }}" style="width:100%;padding:12px;border-radius:10px;background:#0b1525;color:white;border:1px solid #38455d;resize:vertical"></textarea>
+<div><button type="submit">{{ _('Send from Business account', 'ارسال از اکانت پشتیبانی') }}</button></div>
+</form>
+{% if outbound %}
+<h3>{{ _('Operator delivery history', 'وضعیت ارسال‌های اپراتور') }}</h3>
+{% for job in outbound %}<p>#{{ job.id }} — {{ job.status }} {% if job.error_code %}({{ job.error_code }}){% endif %}</p>{% endfor %}
+{% endif %}
+</section>
 <h2>{{ _('Message history (most recent 100)', 'تاریخچه پیام‌ها (۱۰۰ مورد آخر)') }}</h2>
 <div class="messages">{% for m in messages %}
 <div class="msg {{ 'out' if m.direction == 'out' else 'in' }}">
