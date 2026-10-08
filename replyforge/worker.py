@@ -73,7 +73,8 @@ def save_proposal(session: Session, conv: Conversation, proposal) -> None:
     session.add(Outbox(
         conversation_id=conv.id,
         revision=conv.revision,
-        kind="menu" if proposal.menu else "text",
+        kind=("menu" if proposal.menu else
+              "handoff" if conv.owner == "human_pending" else "text"),
         text=proposal.text[:4000],
         buttons=(markup or {}).get("inline_keyboard", []),
     ))
@@ -392,7 +393,7 @@ class Processor:
                                   utcnow() - _aware(conv.last_inbound_at) < REPLY_WINDOW)
             if job.kind == "human":
                 correct_owner = conv.owner == "human"
-            elif job.kind == "text":
+            elif job.kind == "handoff":
                 correct_owner = conv.owner == "human_pending"
             else:
                 correct_owner = conv.owner == "ai" and auto_reply_enabled(session, self.settings)
@@ -425,7 +426,7 @@ class Processor:
                     raise TelegramError("missing_photo_id", status=400)
                 result = self.telegram.send_photo_admin(self.settings.support_alert_chat_id, file_id, text)
                 message_id = result["message_id"]
-            elif kind == "menu" and menu_id:
+            elif kind in ("menu", "handoff") and menu_id:
                 try:
                     self.telegram.edit(connection_id, chat_id, menu_id, text, markup=markup)
                     message_id = menu_id
@@ -465,7 +466,7 @@ class Processor:
             job.status = "sent"
             job.telegram_message_id = message_id
             job.claimed_until = None
-            if kind == "menu" and conv.revision == job.revision:
+            if kind in ("menu", "handoff") and conv.revision == job.revision:
                 conv.menu_message_id = message_id
             if kind not in ("alert", "alert_photo"):
                 session.add(Message(conversation_id=conv.id, telegram_message_id=None,
