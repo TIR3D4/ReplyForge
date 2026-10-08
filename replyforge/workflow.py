@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .agent import AIEngine
 from .config import Settings
 from .integrations import ProviderError, describe, lookup
-from .models import Binding, Conversation, Knowledge, Ticket
+from .models import Audit, Binding, Conversation, Knowledge, Ticket
 from .security import extract_link, fingerprint, redact, subscription_token_fingerprint
 
 
@@ -62,8 +62,11 @@ def _display_state(session: Session, conversation: Conversation, playbook: dict,
         if kind == "complete":
             conversation.workflow = None
             conversation.step = None
-            return Proposal(playbook.get("resolution_text", "Done."),
-                            [("🏠 منوی اصلی" if is_fa(playbook) else "🏠 Main menu", "home")])
+            question = "مشکلت کامل حل شد؟" if is_fa(playbook) else "Was your issue resolved?"
+            return Proposal(playbook.get("resolution_text", "Done.") + "\n\n" + question,
+                            [("✅ بله" if is_fa(playbook) else "✅ Yes", "feedback:yes"),
+                             ("❌ نه" if is_fa(playbook) else "❌ No", "feedback:no"),
+                             ("🏠 منو" if is_fa(playbook) else "🏠 Menu", "home")])
         if kind == "knowledge":
             q = str((conversation.state or {}).get("answers", {}).get("question", ""))
             entries = session.scalars(select(Knowledge).where(Knowledge.enabled.is_(True))).all()
@@ -101,6 +104,15 @@ def apply_action(session: Session, conv: Conversation, playbook: dict, ai: AIEng
         return Proposal(playbook.get("handoff_text", "Human assistance is active."), [], False)
     if action == "human":
         return human(session, conv, playbook)
+    if action == "feedback:yes":
+        session.add(Audit(conversation_id=conv.id, actor="customer", action="feedback_positive"))
+        return Proposal(
+            "ممنون از بازخوردت 🌿" if is_fa(playbook) else "Thanks for your feedback!",
+            [("🏠 منوی اصلی" if is_fa(playbook) else "🏠 Main menu", "home")],
+        )
+    if action == "feedback:no":
+        session.add(Audit(conversation_id=conv.id, actor="customer", action="feedback_negative"))
+        return human(session, conv, playbook, reason="unsolved_after_guidance")
     if action == "home":
         conv.workflow = None
         conv.step = None
