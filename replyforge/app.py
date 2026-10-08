@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import (
     Body, Depends, FastAPI, Form, Header, HTTPException, Request
 )
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -26,7 +26,7 @@ from .models import (
 from .security import constant_time_equal, fingerprint, subscription_token_fingerprint
 from .playbooks import active_version, activate_version, effective_playbook, save_playbook
 from .models import PlaybookVersion
-from .telegram import TelegramClient
+from .telegram import TelegramClient, TelegramError
 from .worker import REPLY_WINDOW, _aware, auto_reply_enabled, worker_is_alive
 
 basic = HTTPBasic()
@@ -295,6 +295,34 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 raise HTTPException(status_code=404, detail="Unknown version")
             session.add(Audit(actor="admin", action="playbook_restore", detail=str(version_id)))
         return RedirectResponse("/admin/playbook", status_code=303)
+
+    @app.get("/admin/media/{message_id}")
+    def operator_media(request: Request, message_id: int, _=Depends(authenticate)):
+        with session_scope(request.app.state.factory) as session:
+            message = session.get(Message, message_id)
+            file_id = (message.data or {}).get("file_id") if message else None
+        if not file_id:
+            raise HTTPException(status_code=404, detail="Media is not available")
+        try:
+            data = request.app.state.telegram.download(
+                str(file_id), request.app.state.settings.media_max_bytes)
+        except (TelegramError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail="Telegram media unavailable") from exc
+        if data.startswith(b"\\xff\\xd8\\xff"):
+            mime = "image/jpeg"
+        elif data.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+            mime = "image/png"
+        elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            mime = "image/webp"
+        elif data[:4] == b"OggS":
+            mime = "audio/ogg"
+        else:
+            raise HTTPException(status_code=415, detail="Unsupported media format")
+        return Response(content=data, media_type=mime, headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'",
+        })
 
     @app.post("/admin/automation")
     def automation_toggle(request: Request, enabled: str = Form(...),
