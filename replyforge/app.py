@@ -624,7 +624,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             ).order_by(desc(Ticket.id)).limit(1))
             if ticket is not None:
                 ticket.status = "in_progress"
-                ticket.first_response_at = ticket.first_response_at or utcnow()
+                # First-response SLA stops ONLY after Telegram confirms delivery.
                 ticket.assignee = ticket.assignee or _
                 ticket.updated_at = utcnow()
             session.add(Outbox(conversation_id=conv.id, revision=conv.revision,

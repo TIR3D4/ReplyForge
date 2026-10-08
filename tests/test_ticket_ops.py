@@ -117,8 +117,12 @@ def test_operator_reply_starts_first_response_sla(database, test_settings, fake_
     with session_scope(database) as db:
         t = db.get(Ticket, ticket_id)
         assert t.status == "in_progress"
-        assert t.first_response_at is not None
+        assert t.first_response_at is None  # queued is NOT delivered
         assert t.assignee == test_settings.admin_username
+    p = Processor(test_settings, database, fake_telegram)
+    assert p.tick()
+    with session_scope(database) as db:
+        assert db.get(Ticket, ticket_id).first_response_at is not None
 
 
 def test_sla_escalates_exactly_once_and_notifies_operator(
@@ -154,3 +158,57 @@ def test_playbook_sla_rejects_ambiguous_and_unsafe_values():
             pass
         else:
             raise AssertionError(invalid + " should fail")
+
+
+
+def test_failed_operator_delivery_does_not_satisfy_sla(
+    database, test_settings, fake_telegram,
+):
+    from replyforge.telegram import TelegramError
+    with session_scope(database) as db:
+        conversation_id, ticket_id = create_ticket(db, sla_overdue=True)
+    auth_header = auth(test_settings)
+    app = build_app(test_settings, factory=database, telegram=fake_telegram)
+    with TestClient(app) as client:
+        assert client.post(
+            f"/admin/conversations/{conversation_id}/reply", auth=auth_header,
+            follow_redirects=False, data={
+                "csrf_token": csrf(test_settings), "message": "در حال پیگیری هستیم",
+            },
+        ).status_code == 303
+
+    def fail(*args, **kwargs):
+        raise TelegramError("request timed out", uncertain=True)
+
+    fake_telegram.send = fail
+    processor = Processor(test_settings, database, fake_telegram)
+    assert processor.tick()
+    with session_scope(database) as db:
+        ticket = db.get(Ticket, ticket_id)
+        assert ticket.first_response_at is None
+        assert db.scalar(select(Outbox)).status == "uncertain"
+    assert processor.tick()  # overdue ticket escalated despite queued manual reply
+    with session_scope(database) as db:
+        ticket = db.get(Ticket, ticket_id)
+        assert ticket.escalated_at is not None
+        assert ticket.priority == "urgent"
+
+
+def test_owner_written_message_satisfies_first_response_sla(
+    database, test_settings, fake_telegram,
+):
+    from replyforge.models import Event
+    with session_scope(database) as db:
+        conversation_id, ticket_id = create_ticket(db)
+        db.add(Event(update_id=910, status="processing", payload={
+            "update_id": 910, "business_message": {
+                "business_connection_id": "support", "chat": {"id": 7001},
+                "message_id": 910, "from": {"id": 901},
+                "text": "در حال بررسی هستم",
+            },
+        }))
+    Processor(test_settings, database, fake_telegram).process_event(910)
+    with session_scope(database) as db:
+        ticket = db.get(Ticket, ticket_id)
+        assert ticket.first_response_at is not None
+        assert ticket.status == "in_progress"

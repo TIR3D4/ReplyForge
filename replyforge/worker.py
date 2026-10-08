@@ -252,6 +252,14 @@ class Processor:
                 ))
             conv.owner = "human"
             conv.revision += 1
+            existing = session.scalar(select(Ticket).where(
+                Ticket.conversation_id == conv.id,
+                Ticket.status.in_(("open", "in_progress")),
+            ).order_by(Ticket.id.desc()).limit(1))
+            if existing:
+                existing.status = "in_progress"
+                existing.first_response_at = existing.first_response_at or utcnow()
+                existing.updated_at = utcnow()
             session.add(Audit(conversation_id=conv.id, actor="owner", action="takeover"))
             return
         if not record_inbound(session, conv, message):
@@ -564,6 +572,16 @@ class Processor:
             job.claimed_until = None
             if kind in ("menu", "handoff") and conv.revision == job.revision:
                 conv.menu_message_id = message_id
+            if kind == "human":
+                # Only a confirmed Telegram send can satisfy the first-response SLA.
+                ticket = session.scalar(select(Ticket).where(
+                    Ticket.conversation_id == conv.id,
+                    Ticket.status.in_(("open", "in_progress")),
+                ).order_by(Ticket.id.desc()).limit(1))
+                if ticket is not None:
+                    ticket.first_response_at = ticket.first_response_at or utcnow()
+                    ticket.status = "in_progress"
+                    ticket.updated_at = utcnow()
             if kind not in ("alert", "alert_photo"):
                 session.add(Message(conversation_id=conv.id, telegram_message_id=None,
                                     direction="out", kind=kind, content=redact(text)))
