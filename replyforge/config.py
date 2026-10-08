@@ -29,6 +29,7 @@ class Settings:
     webhook_public_url: str
     webhook_path: str
     poll_seconds: float
+    max_llm_calls_per_chat_per_day: int
     lease_seconds: int
     ai_api_key: str
     ai_base_url: str
@@ -57,6 +58,7 @@ class Settings:
             webhook_public_url=g("WEBHOOK_PUBLIC_URL"),
             webhook_path=g("WEBHOOK_PATH", "/telegram/webhook"),
             poll_seconds=float(g("WORKER_POLL_SECONDS", "1")),
+            max_llm_calls_per_chat_per_day=int(g("MAX_LLM_CALLS_PER_CHAT_PER_DAY", "40")),
             lease_seconds=int(g("WORKER_LEASE_SECONDS", "120")),
             ai_api_key=g("AI_API_KEY"),
             ai_base_url=g("AI_BASE_URL", "https://api.openai.com/v1"),
@@ -84,6 +86,8 @@ class Settings:
                 raise ConfigError("Secrets must be at least 16 characters")
         if obj.support_alert_chat_id == 0:
             raise ConfigError("SUPPORT_ALERT_CHAT_ID must be a non-zero Telegram chat ID")
+        if obj.max_llm_calls_per_chat_per_day < 0:
+            raise ConfigError("MAX_LLM_CALLS_PER_CHAT_PER_DAY cannot be negative")
         if obj.poll_seconds <= 0 or obj.lease_seconds < 20:
             raise ConfigError("Invalid worker intervals")
         if obj.webhook_path != "/telegram/webhook":

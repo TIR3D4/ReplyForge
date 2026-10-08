@@ -7,6 +7,7 @@ import re
 import httpx
 
 from .config import Settings
+from .security import redact
 
 log = logging.getLogger(__name__)
 
@@ -32,12 +33,15 @@ def local_intent(text: str, allowed: set[str]) -> str | None:
 
 
 class AIEngine:
-    def __init__(self, settings: Settings, *, transport=None):
+    def __init__(self, settings: Settings, *, transport=None, allow_call=None):
         self.settings = settings
         self.transport = transport
+        self.allow_call = allow_call
 
     def _complete(self, system: str, user: str) -> str | None:
         if not self.settings.ai_api_key:
+            return None
+        if self.allow_call is not None and not self.allow_call():
             return None
         try:
             with httpx.Client(base_url=self.settings.ai_base_url.rstrip("/") + "/", timeout=12,
@@ -103,11 +107,19 @@ class AIEngine:
                 overlap += 100
             if overlap:
                 scored.append((overlap, entry))
-        if not scored:
-            return None
         scored.sort(key=lambda x: x[0], reverse=True)
-        top_score, top = scored[0]
-        if top_score < 2 and top_score < 100:
+        if scored and scored[0][0] >= 2:
+            # Never invent policy or payment details. Stored answers are authoritative.
+            return scored[0][1].answer
+        if not entries or not self.settings.ai_api_key:
             return None
-        # Never invent policy or payment details. The stored, approved answer is authoritative.
-        return top.answer
+        candidates = list(entries)[:25]
+        identifiers = ", ".join(str(e.id) + ": " + e.question[:160] for e in candidates)
+        selected = self._complete(
+            "You are a semantic FAQ selector. Return ONLY an exact integer ID for a "
+            "clearly relevant approved FAQ, or NONE. Do not answer the question. "
+            "Allowed FAQs: " + identifiers,
+            redact(question),
+        )
+        selected = (selected or "").strip()
+        return next((e.answer for e in candidates if str(e.id) == selected), None)

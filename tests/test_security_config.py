@@ -53,3 +53,16 @@ def test_ai_fallback_never_creates_payment_confirmation(test_settings):
     ai = AIEngine(test_settings)
     assert ai._complete("instructions", "customer text") is None
     assert ai.knowledge_answer("I paid", []) is None
+
+
+def test_llm_daily_budget_guard_prevents_external_request(test_settings):
+    from dataclasses import replace
+    import httpx
+    called = []
+    def handler(request):
+        called.append(request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "flow:connection"}}]})
+    s = replace(test_settings, ai_api_key="mock_key")
+    ai = AIEngine(s, transport=httpx.MockTransport(handler), allow_call=lambda: False)
+    assert ai.select_intent("unclear words", [{"label": "Help", "action": "flow:connection"}]) is None
+    assert called == []

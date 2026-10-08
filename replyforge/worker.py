@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 import time
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .agent import AIEngine
@@ -102,7 +102,25 @@ class Processor:
         self.factory = factory
         self.telegram = telegram
         self.playbook = load_playbook(settings.business_config)
-        self.ai = AIEngine(settings)
+
+    def _agent(self, session: Session, conv: Conversation) -> AIEngine:
+        """Create a chat-scoped model budget and audit every attempted model call."""
+        def permit_call() -> bool:
+            if not self.settings.ai_api_key:
+                return False
+            since = utcnow() - timedelta(days=1)
+            used = session.scalar(select(func.count(Audit.id)).where(
+                Audit.conversation_id == conv.id,
+                Audit.action == "ai_call",
+                Audit.created_at >= since,
+            )) or 0
+            if used >= self.settings.max_llm_calls_per_chat_per_day:
+                return False
+            session.add(Audit(conversation_id=conv.id, actor="system", action="ai_call"))
+            session.flush()
+            return True
+
+        return AIEngine(self.settings, allow_call=permit_call)
 
     def _process_payload(self, session: Session, payload: dict) -> None:
         if "business_connection" in payload:
@@ -166,7 +184,7 @@ class Processor:
                 return
             action = callback_action(conv, str(callback.get("data") or ""))
             if action:
-                proposal = apply_action(session, conv, self.playbook, self.ai, self.settings, action)
+                proposal = apply_action(session, conv, self.playbook, self._agent(session, conv), self.settings, action)
                 if conn.can_reply:
                     save_proposal(session, conv, proposal)
                     self._queue_operator_alert(session, conv)
@@ -191,7 +209,7 @@ class Processor:
             document.get("file_id") if str(document.get("mime_type", "")).startswith("image/") else None
         )
         text = message.get("text") or message.get("caption") or ""
-        proposal = accept_input(session, conv, self.playbook, self.ai, self.settings, text, file_id)
+        proposal = accept_input(session, conv, self.playbook, self._agent(session, conv), self.settings, text, file_id)
         save_proposal(session, conv, proposal)
         self._queue_operator_alert(session, conv)
 

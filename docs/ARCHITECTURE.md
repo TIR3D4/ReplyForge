@@ -50,5 +50,5 @@ The model selects only predefined menu actions or options. It cannot execute SQL
 - No retroactive customer history before bot connection.
 - No multi-worker horizontal processing guarantee.
 - No per-account business settings within one deployment.
-- No semantic vector embeddings or image OCR in V1; approved text FAQ search and manual image review are intentionally conservative.
+- No semantic vector embeddings or image OCR in V1; approved FAQ lookup uses lexical search plus optional model selection from a bounded list. Images are collected for manual review.
 - Database schema is initialized by Alembic migration 0001 on first boot. All future schema changes require reviewed forward migrations, backups and a staging rehearsal.
