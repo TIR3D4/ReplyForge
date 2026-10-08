@@ -4,26 +4,33 @@ No real customer data or live Telegram/panel/provider credentials were used.
 
 ## Reproducible green Actions run
 
-Commit: [`9cd99d8805a11dcb199315c182c3ae018307e680`](https://github.com/TIR3D4/ReplyForge/commit/9cd99d8805a11dcb199315c182c3ae018307e680).
-[Complete successful run 37848284654](https://github.com/TIR3D4/ReplyForge/actions/runs/37848284654).
+Commit: [`c46764148e4dcaf56ae7142946ef895b6bab6747`](https://github.com/TIR3D4/ReplyForge/commit/c46764148e4dcaf56ae7142946ef895b6bab6747).
+[Complete successful run 37848910918](https://github.com/TIR3D4/ReplyForge/actions/runs/37848910918).
 
 | Check | Observed result | Boundary |
 |---|---|---|
-| Python suite | 129 passed, 6 skipped | Skips are 4 PostgreSQL tests and 2 browser tests, executed separately below |
+| Python suite | 130 passed, 6 skipped | Skips are 4 PostgreSQL tests and 2 browser tests, executed separately below |
 | PostgreSQL 16 | 4 passed | Migration chain, queue claim, takeover/send row-lock race, worker exclusivity, JSON-state retention |
-| Chromium UI | 2 parametrized tests passed | English/Persian, 1440px/360px, 8 routes, themes, actual policy submit and playground submit |
+| Chromium UI | 2 parametrized tests passed | English/Persian, 1440px/360px, 9 routes including populated conversation/ticket, themes, actual policy submit and playground submit |
 | Docker build/config/migration | Passed | Production image and non-root migration command |
 | Disposable Compose deployment | Passed | API/worker readiness, restart, pg_dump, pg_restore into a separate database, restored schema head |
 | Python runtime dependency audit | Passed | No known vulnerabilities reported for `requirements.lock`; JSON report in run artifacts |
 | Compile and static checks | Passed | `compileall`, Ruff E4/E7/E9/F |
 
-The latest local run after adding readable HTML errors and seeded browser coverage was **130 passed, 6 skipped**. See subsequent PR checks for the enriched browser scenario before deploying that newer commit. One Starlette TestClient deprecation warning remains; it is not a test failure.
+The subsequent local run including the late-batch follow-up regression is **131 passed, 6 skipped**. Check the current PR head's Actions before deploying that newer commit. One Starlette TestClient deprecation warning remains; it is not a test failure.
 
 ## Screenshots and visual review
 
-The `interface-screenshots` artifact on the Actions run contains full-page PNGs generated from the actual running application, not design mockups. The earlier [verified responsive artifact](https://github.com/TIR3D4/ReplyForge/actions/runs/37847413600/artifacts/11579898933) contains 36 images (two locales, two widths, eight routes plus theme captures). Persian mobile dashboard and desktop Insight and English desktop dashboard were visually inspected. CI found a real 360px horizontal overflow; CSS grid/heading sizing was corrected and the subsequent browser checks passed. Later tests add a populated conversation/ticket to cover non-empty states.
+The [populated-interface artifact](https://github.com/TIR3D4/ReplyForge/actions/runs/37848910918/artifacts/11580807158) contains 40 full-page PNGs from the actual running application: two locales, two widths, nine routes plus theme captures. Persian mobile conversation, desktop Insight and English desktop inbox were visually inspected. CI found a real 360px horizontal overflow in an earlier run; CSS grid/heading sizing was corrected and subsequent browser checks passed.
 
-Artifacts have finite retention (currently 90 days). Download them from Actions for longer-term release evidence. Screenshots use synthetic content and no production credentials.
+Selected original PNGs are preserved in the repository with provenance in [screenshots/README.md](screenshots/README.md). Full Actions artifacts have finite retention (currently 90 days). All screenshots use synthetic content.
+
+![English desktop inbox](screenshots/inbox-en-desktop.png)
+
+![Persian desktop Insight](screenshots/insight-fa-desktop.png)
+
+[Persian mobile conversation screenshot](screenshots/conversation-fa-mobile.png)
+
 
 ## Meaningful regression coverage
 

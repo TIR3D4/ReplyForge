@@ -46,3 +46,16 @@ def test_graceful_shutdown_does_not_claim_more_work(database, test_settings, fak
         raise AssertionError('Worker claimed work after stop')
     worker.tick = unexpected_tick
     worker.run()
+
+
+def test_late_batch_head_does_not_discard_newer_followup(database, test_settings, fake_telegram):
+    seed(database)
+    worker = Processor(test_settings, database, fake_telegram)
+    with session_scope(database) as db:
+        worker._process_payload(db, incoming(20, 'سلام'))
+    with session_scope(database) as db:
+        worker._process_payload(db, incoming(10, 'old input'),
+            batch_messages=[incoming(30, 'اپراتور')['business_message']])
+        conv = db.scalar(select(Conversation))
+        assert conv.owner == 'human_pending'
+        assert len(db.scalars(select(Message)).all()) == 3

@@ -283,12 +283,17 @@ class Processor:
         if newest_id is not None and message["message_id"] < newest_id:
             session.add(Audit(conversation_id=conv.id, actor="system",
                               action="late_message_archived"))
+            # A coalesced batch may still contain newer input. Do not mark that
+            # input done without processing it when its first message was late.
+            if batch_messages:
+                self._process_payload(session, {"business_message": batch_messages[0]},
+                                      batch_messages=batch_messages[1:])
             return  # Keep evidence; never feed late input into a newer workflow step.
         # Persist each constituent message independently. Only the prompt/context
         # is combined; Telegram message IDs and attachments remain traceable.
         accepted_messages = [message]
         for item in batch_messages or []:
-            if record_inbound(session, conv, item):
+            if record_inbound(session, conv, item) and item.get("message_id", 0) > accepted_messages[-1]["message_id"]:
                 accepted_messages.append(item)
         if conv.owner != "ai" or not conn.can_reply or not auto_reply_enabled(session, self.settings):
             if conv.owner in ("human", "human_pending"):

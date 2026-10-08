@@ -211,7 +211,8 @@ def accept_input(session: Session, conv: Conversation, playbook: dict, ai: AIEng
         info = dict(conv.state or {})
         info["recent_slots"] = {**info.get("recent_slots", {}), **slots}
         conv.state = info
-    if any(hint in lowered for hint in ("پشتیبان انسانی", "اپراتور انسانی", "human support", "speak to human")):
+    if (lowered.strip() in ("اپراتور", "پشتیبان", "human", "operator", "agent")
+            or any(hint in lowered for hint in ("پشتیبان انسانی", "اپراتور انسانی", "human support", "speak to human"))):
         return human(session, conv, playbook)
     if lowered.strip() in ("منو", "منوی اصلی", "menu", "/start"):
         return apply_action(session, conv, playbook, ai, settings, "home")
