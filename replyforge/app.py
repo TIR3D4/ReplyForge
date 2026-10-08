@@ -428,6 +428,30 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                                     user_ref=user_ref, label=label[:255]))
         return RedirectResponse("/admin#bindings", status_code=303)
 
+
+    @app.post("/admin/outbox/{outbox_id}/resolve")
+    def resolve_uncertain_delivery(
+        request: Request, outbox_id: int, resolution: str = Form(...),
+        csrf_token: str = Form(...), _=Depends(authenticate),
+    ):
+        """Only acknowledge or cancel an ambiguous send; never replay blindly."""
+        csrf(request, csrf_token)
+        if resolution not in ("confirmed_sent", "confirmed_not_sent"):
+            raise HTTPException(422, detail="Invalid delivery reconciliation")
+        with session_scope(request.app.state.factory) as session:
+            job = session.scalar(select(Outbox).where(
+                Outbox.id == outbox_id).with_for_update())
+            if job is None:
+                raise HTTPException(404, detail="Delivery not found")
+            if job.status != "uncertain":
+                raise HTTPException(409, detail="Only uncertain messages can be reconciled")
+            job.status = "sent" if resolution == "confirmed_sent" else "cancelled"
+            job.error_code = "manual_" + resolution
+            job.claimed_until = None
+            session.add(Audit(conversation_id=job.conversation_id, actor="operator",
+                              action="delivery_reconciled", detail=str(job.id) + ":" + resolution))
+        return RedirectResponse("/admin#uncertain", status_code=303)
+
     @app.post("/admin/tickets/{ticket_id}/close")
     def close_ticket(request: Request, ticket_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
         csrf(request, csrf_token)

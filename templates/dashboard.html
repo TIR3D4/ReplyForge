@@ -75,7 +75,13 @@ button.ghost{background:transparent}form{display:grid;gap:10px}.badge{padding:4p
 </tr>{% else %}<tr><td colspan="4">{{ _('No tickets.', 'تیکتی وجود ندارد.') }}</td></tr>{% endfor %}</tbody></table>
 </section>
 <section class="panel" id="uncertain"><h2>⚠️ {{ _('Delivery requiring manual review', 'ارسال‌های نیازمند بررسی دستی') }}</h2>
-<table><tbody>{% for d in uncertain %}<tr><td>Outbox #{{ d.id }}</td><td>Conversation {{ d.conversation_id }}</td><td>{{ d.error_code or 'unknown' }}</td>
+<p class="muted">{{ _('Inspect the actual Telegram chat before marking a delivery; never retry unknown sends blindly.', 'قبل از ثبت نتیجه، گفتگو را در تلگرام بررسی کنید؛ پیام نامطمئن را کورکورانه دوباره ارسال نکنید.') }}</p>
+<table><tbody>{% for d in uncertain %}<tr><td>Outbox #{{ d.id }}</td><td><a href="/admin/conversations/{{ d.conversation_id }}">Conversation {{ d.conversation_id }}</a></td><td>{{ d.error_code or 'unknown' }}</td>
+<td><form method="post" action="/admin/outbox/{{ d.id }}/resolve">
+<input type="hidden" name="csrf_token" value="{{ csrf }}">
+<button type="submit" name="resolution" value="confirmed_sent">{{ _('Sent', 'ارسال شده') }}</button>
+<button type="submit" name="resolution" value="confirmed_not_sent" class="ghost">{{ _('Not sent', 'ارسال نشده') }}</button>
+</form></td>
 </tr>{% else %}<tr><td class="muted">{{ _('No uncertain sends.', 'ارسال نامطمئنی وجود ندارد.') }}</td></tr>{% endfor %}</tbody></table>
 </section>
 </div>

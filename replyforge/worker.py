@@ -411,10 +411,29 @@ class Processor:
             permitted = is_alert or (
                 conn.enabled and conn.can_reply and recent_inbound and correct_owner
             )
-            if conv.revision != job.revision or not permitted:
+            # AI drafts are revision-fenced; intentionally queued human messages
+            # are independent commands and must NOT erase each other when the
+            # operator types twice before the worker flushes the outbox.
+            revision_stale = job.kind != "human" and conv.revision != job.revision
+            if revision_stale or not permitted:
                 job.status = "cancelled"
                 job.error_code = "obsolete_or_not_permitted"
                 return
+            if job.kind == "human":
+                older = session.scalar(select(Outbox.id).where(
+                    Outbox.conversation_id == conv.id,
+                    Outbox.kind == "human",
+                    Outbox.id < job.id,
+                    Outbox.status.in_(("pending", "sending", "uncertain")),
+                ).order_by(Outbox.id).limit(1))
+                if older is not None:
+                    # Preserve per-chat operator message ordering even after a
+                    # Telegram rate limit or unknown delivery outcome.
+                    job.status = "pending"
+                    job.available_at = utcnow() + timedelta(seconds=5)
+                    job.claimed_until = None
+                    job.error_code = "waiting_for_previous_operator_reply"
+                    return
             connection_id = conn.id
             chat_id = conv.chat_id
             menu_id = conv.menu_message_id
