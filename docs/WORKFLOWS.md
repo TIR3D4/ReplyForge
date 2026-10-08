@@ -1,6 +1,6 @@
 # Configurable support workflows
 
-Select a YAML playbook with BUSINESS_CONFIG. The default is config/business.yaml; examples/azadbird.yaml demonstrates a Persian VPN support workflow.
+Choose a YAML playbook with BUSINESS_CONFIG as a deployment fallback. The operator UI at /admin/playbook can publish validated revisions and restore previous versions without changing source code. The default is config/business.yaml; examples/azadbird.yaml demonstrates a Persian VPN support workflow.
 
 A playbook defines: brand, locale, welcome, handoff_text, resolution_text, menu and workflows.
 

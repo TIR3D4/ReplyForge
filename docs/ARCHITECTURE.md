@@ -36,7 +36,7 @@ A Telegram send outcome may be unknown after an HTTP timeout or process crash. A
 
 Modes: ai, human_pending, human. Customer messages are always recorded; only ai mode can invoke the AI workflow. Human pending is created by explicit request, failed authorized lookup, or unresolved knowledge, with an open ticket. Owner-origin Business messages set human immediately. Admin resume clears the previous workflow and increments the revision.
 
-A pre-send revision check cancels stale outbox work. A race still exists if a human types *after* the check and *while* a network send is in-flight. Full distributed atomic send coordination is impossible across Telegram and PostgreSQL. Production governance should monitor this and maintain an operator emergency pause.
+Active business playbooks are stored as versioned, validated YAML. Superseded conversation workflows reset safely instead of continuing under an incompatible schema. A pre-send revision check cancels stale outbox work. A race still exists if a human types *after* the check and *while* a network send is in-flight. Full distributed atomic send coordination is impossible across Telegram and PostgreSQL. Production governance should monitor this and maintain an operator emergency pause.
 
 ## Security boundaries
 

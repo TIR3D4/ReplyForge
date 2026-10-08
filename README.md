@@ -57,7 +57,7 @@ The first incoming message is interpreted (if its intent is clear) or opens a ge
 
 ## Personalize without editing Python
 
-Edit config/business.yaml or copy an example playbook, then restart the API and worker. Change brand, language, welcome/handoff text, menu labels, workflows, prompts, options and transitions. Knowledge answers and HMAC subscription associations can be added from the admin UI. See docs/WORKFLOWS.md for the schema and safety rules.
+Edit active menus, prompts and workflows directly in /admin/playbook with validation, version history and rollback (changes apply on subsequent events; stale in-progress flows reset safely). You can also edit config/business.yaml, the file-backed default, and restart the services. Change brand, language, welcome/handoff text, menu labels, workflows, prompts, options and transitions. Knowledge answers and HMAC subscription associations can be added from the admin UI. See docs/WORKFLOWS.md for the schema and safety rules.
 
 ## AI operation
 
