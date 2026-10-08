@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<!DOCTYPE html><html lang="{{ locale }}" dir="{{ 'rtl' if locale == 'fa' else 'ltr' }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ReplyForge · Conversation {{ conv.id }}</title>
 <style>
 :root{font-family:system-ui,sans-serif;background:#0b1120;color:#e8efff;color-scheme:dark}
@@ -11,18 +11,18 @@ button{border:0;border-radius:10px;background:#176c72;color:white;padding:12px 1
 button.secondary{background:#38455d}form{display:inline}
 </style></head>
 <body>
-<a href="/admin">← Dashboard</a><h1>Conversation #{{ conv.id }}</h1>
-<div class="card"><strong>Telegram chat:</strong> {{ conv.chat_id }} · <strong>Owner:</strong> {{ conv.owner }}
-<p><strong>Workflow:</strong> {{ conv.workflow or 'None' }} · <strong>Step:</strong> {{ conv.step or 'None' }}</p>
+<a href="/admin">{{ _('← Dashboard', '← داشبورد') }}</a><h1>{{ _('Conversation #', 'گفتگو #') }}{{ conv.id }}</h1>
+<div class="card"><strong>{{ _('Telegram chat:', 'شناسه تلگرام:') }}</strong> {{ conv.chat_id }} <a href="tg://user?id={{ conv.chat_id }}">{{ _('Open in Telegram', 'بازکردن در تلگرام') }}</a> · <strong>{{ _('Owner:', 'مسئول:') }}</strong> {{ conv.owner }}
+<p><strong>{{ _('Workflow:', 'فرایند:') }}</strong> {{ conv.workflow or 'None' }} · <strong>{{ _('Step:', 'مرحله:') }}</strong> {{ conv.step or 'None' }}</p>
 <form method="post" action="/admin/conversations/{{ conv.id }}/takeover">
-<input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">Human takeover</button></form>
+<input type="hidden" name="csrf_token" value="{{ csrf }}"><button class="secondary">{{ _('Human takeover', 'تحویل به اپراتور') }}</button></form>
 <form method="post" action="/admin/conversations/{{ conv.id }}/resume">
-<input type="hidden" name="csrf_token" value="{{ csrf }}"><button>Resume AI</button></form>
+<input type="hidden" name="csrf_token" value="{{ csrf }}"><button>{{ _('Resume AI', 'بازگشت به AI') }}</button></form>
 </div>
-<h2>Message history (most recent 100)</h2>
+<h2>{{ _('Message history (most recent 100)', 'تاریخچه پیام‌ها (۱۰۰ مورد آخر)') }}</h2>
 <div class="messages">{% for m in messages %}
 <div class="msg {{ 'out' if m.direction == 'out' else 'in' }}">
 <span class="meta">{{ m.direction }} · {{ m.kind }} · {{ m.created_at }}</span>{{ m.content }}
 </div>
-{% else %}<div class="card">No messages yet.</div>{% endfor %}</div>
+{% else %}<div class="card">{{ _('No messages yet.', 'هنوز پیامی ثبت نشده.') }}</div>{% endfor %}</div>
 </body></html>

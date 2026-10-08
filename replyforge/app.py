@@ -159,6 +159,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 **data, "brand": request.app.state.playbook["brand"],
                 "locale": request.app.state.playbook.get("locale", "en"),
                 "csrf": csrf_value(request),
+                "_": lambda en, fa: fa if request.app.state.playbook.get("locale") == "fa" else en,
             })
 
     @app.get("/admin/conversations/{conversation_id}", response_class=HTMLResponse)
@@ -173,6 +174,8 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             return templates.TemplateResponse(request, "conversation.html", {
                 "conv": conv, "messages": list(reversed(messages)),
                 "csrf": csrf_value(request),
+                "locale": request.app.state.playbook.get("locale", "en"),
+                "_": lambda en, fa: fa if request.app.state.playbook.get("locale") == "fa" else en,
             })
 
     @app.post("/admin/conversations/{conversation_id}/takeover")
