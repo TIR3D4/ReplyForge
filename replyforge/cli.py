@@ -5,7 +5,9 @@ import argparse
 import logging
 
 from .config import Settings, load_playbook
-from .database import create_schema, session_factory
+from .database import session_factory
+from alembic import command
+from alembic.config import Config
 from .telegram import TelegramClient
 from .worker import Processor
 
@@ -22,8 +24,10 @@ def main() -> None:
         return
     engine, factory = session_factory(s.database_url)
     if args.command == "init":
-        create_schema(engine)
-        print("ReplyForge database schema created.")
+        alembic_cfg = Config("alembic.ini")
+        alembic_cfg.set_main_option("sqlalchemy.url", s.database_url.replace("%", "%%"))
+        command.upgrade(alembic_cfg, "head")
+        print("ReplyForge migrations up to date.")
         return
     bot = TelegramClient(s.bot_token)
     try:

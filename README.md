@@ -35,7 +35,7 @@ Requirements: Docker Compose v2, PostgreSQL persistent volume, a domain with HTT
 2. Select the business playbook:
    - Generic: BUSINESS_CONFIG=config/business.yaml.
    - VPN / Persian: BUSINESS_CONFIG=examples/azadbird.yaml.
-3. Build and start:
+3. Build and start (the Compose init service applies Alembic migrations before the API and worker):
    - docker compose up -d --build
    - docker compose ps
    - curl http://127.0.0.1:8080/healthz
@@ -46,6 +46,8 @@ Requirements: Docker Compose v2, PostgreSQL persistent volume, a domain with HTT
 6. In @BotFather enable Business/Secretary Mode; in Telegram Settings > Business > Chatbots, connect the bot to your support account, permit message reading and replying, and select the correct incoming chats.
 7. Open https://YOUR_DOMAIN/admin and authenticate with ADMIN_USERNAME and ADMIN_PASSWORD. Add approved FAQs and, if using VPN support, subscription associations.
 8. To receive human-ticket notifications in a Telegram chat, first start the bot or invite it into your operator group, then set SUPPORT_ALERT_CHAT_ID and restart the containers.
+
+For guided secret generation, run python3 scripts/setup.py --preset generic or --preset azadbird before starting Compose. Existing .env files are never overwritten.
 
 No credentials are stored in the repository. The Bot API only permits replies under the current Business connection rights and the applicable recent-inbound window.
 

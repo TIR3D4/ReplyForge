@@ -51,4 +51,4 @@ The model selects only predefined menu actions or options. It cannot execute SQL
 - No multi-worker horizontal processing guarantee.
 - No per-account business settings within one deployment.
 - No semantic vector embeddings or image OCR in V1; approved text FAQ search and manual image review are intentionally conservative.
-- Database schema is created on first boot. **Do not change existing schema without a migration** in subsequent releases.
+- Database schema is initialized by Alembic migration 0001 on first boot. All future schema changes require reviewed forward migrations, backups and a staging rehearsal.

@@ -53,7 +53,7 @@ Watch: incoming_events in dead status, outbox in uncertain or failed status, len
 
 ## Known constraints
 
-V1 schema is created with create_all for initial installation. Upgrade migrations are not yet automated. Avoid deploying schema-incompatible changes to an existing database without a reviewed migration and backup. In-flight Telegram send and human intervention can still race; the pre-send version check mitigates but cannot eliminate cross-service races.
+V1 uses an Alembic initial migration. The Compose init service applies pending migrations before starting API/worker; back up the database and rehearse version upgrades in staging. Do not bypass or downgrade a migration in production. In-flight Telegram send and human intervention can still race; the pre-send version check mitigates but cannot eliminate cross-service races.
 
 ## Go-live checklist
 

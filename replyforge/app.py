@@ -16,7 +16,7 @@ from sqlalchemy import desc, func, select, text
 from sqlalchemy.exc import IntegrityError
 
 from .config import Settings, load_playbook
-from .database import create_schema, session_factory, session_scope
+from .database import session_factory, session_scope
 from .models import (
     Audit, Binding, Conversation, Event, Knowledge, Message, Outbox, Ticket, utcnow
 )
@@ -44,7 +44,6 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         sf = factory
         if sf is None:
             engine, sf = session_factory(s.database_url)
-            create_schema(engine)
         instance.state.settings = s
         instance.state.factory = sf
         instance.state.playbook = playbook
