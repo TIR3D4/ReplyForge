@@ -12,7 +12,9 @@ TOKEN = re.compile(r"(?i)(?:bearer|token|password|secret)[ \t]*[:=][ \t]*\S+")
 
 
 def redact(text: str) -> str:
-    return TOKEN.sub("[redacted credential]", BANK_CARD.sub("[redacted number]", CONFIG_LINK.sub("[redacted link]", text or ""))[:4000]
+    cleaned = CONFIG_LINK.sub("[redacted link]", text or "")
+    cleaned = BANK_CARD.sub("[redacted number]", cleaned)
+    return TOKEN.sub("[redacted credential]", cleaned)[:4000]
 
 
 def extract_link(text: str) -> str | None:

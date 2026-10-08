@@ -17,7 +17,7 @@ def test_playbooks_validate():
 
 def test_invalid_playbook_does_not_allow_undefined_actions(tmp_path):
     file = tmp_path / "invalid.yaml"
-    file.write_text("brand: X\\nmenu: [{label: X, action: 'flow:missing'}]\\nworkflows: {}\\n")
+    file.write_text("brand: X\nmenu: [{label: X, action: 'flow:missing'}]\nworkflows: {}\n")
     with pytest.raises(ConfigError):
         load_playbook(file)
 
