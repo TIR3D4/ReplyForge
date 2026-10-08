@@ -30,6 +30,7 @@ class Settings:
     webhook_path: str
     poll_seconds: float
     max_llm_calls_per_chat_per_day: int
+    auto_reply_enabled: bool
     lease_seconds: int
     ai_api_key: str
     ai_base_url: str
@@ -59,6 +60,7 @@ class Settings:
             webhook_path=g("WEBHOOK_PATH", "/telegram/webhook"),
             poll_seconds=float(g("WORKER_POLL_SECONDS", "1")),
             max_llm_calls_per_chat_per_day=int(g("MAX_LLM_CALLS_PER_CHAT_PER_DAY", "40")),
+            auto_reply_enabled=g("AUTO_REPLY_ENABLED", "false").lower() == "true",
             lease_seconds=int(g("WORKER_LEASE_SECONDS", "120")),
             ai_api_key=g("AI_API_KEY"),
             ai_base_url=g("AI_BASE_URL", "https://api.openai.com/v1"),
