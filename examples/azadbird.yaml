@@ -1,0 +1,74 @@
+brand: پرنده آزاد | پشتیبانی
+locale: fa
+welcome: "سلام 🌿 به پشتیبانی پرنده آزاد خوش اومدی. موضوع رو انتخاب کن یا مشکلت رو بنویس."
+handoff_text: "درخواستت ثبت شد و برای پشتیبان انسانی فرستاده شد. لطفاً منتظر بررسی بمون."
+resolution_text: "عالیه! خوشحالیم که مشکلت حل شد 🌿"
+menu:
+  - {label: "🔌 مشکل اتصال", action: "flow:connection"}
+  - {label: "📊 بررسی اشتراک", action: "flow:subscription"}
+  - {label: "🧾 تأیید رسید", action: "flow:payment"}
+  - {label: "📦 سرویس تحویل نگرفتم", action: "flow:delivery"}
+  - {label: "👨‍💻 پشتیبان انسانی", action: "human"}
+workflows:
+  subscription:
+    title: "📊 وضعیت اشتراک"
+    start: link
+    states:
+      link: {prompt: "لینک اشتراکت رو بفرست تا وضعیت حجم و زمان باقی‌مونده رو بررسی کنم.", input: subscription, field: subscription, next: done}
+      done: {type: complete}
+  connection:
+    title: "🔌 بررسی اتصال"
+    start: link
+    states:
+      link: {prompt: "اول لینک اشتراکت رو بفرست تا وضعیتش رو بررسی کنیم.", input: subscription, field: subscription, next: device}
+      device:
+        prompt: "از چه دستگاهی استفاده می‌کنی؟"
+        input: choice
+        field: device
+        next: app
+        options:
+          - {label: "📱 آیفون", value: ios}
+          - {label: "🤖 اندروید", value: android}
+          - {label: "💻 ویندوز", value: windows}
+      app: {prompt: "از چه برنامه‌ای استفاده می‌کنی؟ مثلاً V2Box، Happ یا v2rayNG.", input: text, field: application, next: refresh}
+      refresh:
+        prompt: "لطفاً اشتراک رو داخل برنامه بروزرسانی کن، بعد نتیجه رو بگو."
+        input: choice
+        field: refresh
+        options:
+          - {label: "✅ وصل شد", value: fixed, next: done}
+          - {label: "❌ هنوز وصل نمیشه", value: failed, next: network}
+      network:
+        prompt: "لطفاً با اینترنت دیگه (وای‌فای یا اپراتور دوم) هم امتحان کن."
+        input: choice
+        field: network
+        options:
+          - {label: "✅ وصل شد", value: fixed, next: done}
+          - {label: "❌ وصل نشد", value: failed, next: human}
+      done: {type: complete}
+      human: {type: handoff}
+  payment:
+    title: "🧾 پیگیری رسید"
+    start: when
+    states:
+      when:
+        prompt: "چند دقیقه از ارسال رسیدت گذشته؟"
+        input: choice
+        field: wait
+        options:
+          - {label: "کمتر از ۵ دقیقه", value: under5, next: proof}
+          - {label: "۵ تا ۱۵ دقیقه", value: medium, next: proof}
+          - {label: "بیشتر از ۱۵ دقیقه", value: over15, next: proof}
+      proof:
+        prompt: "لطفاً عکس رسید رو بفرست. اطلاعات شخصی نامرتبط رو بپوشون. در صورت نیاز پشتیبان درباره پیامک برداشت راهنمایی می‌کنه."
+        input: photo
+        field: receipt_file_id
+        next: human
+      human: {type: handoff}
+  delivery:
+    title: "📦 پیگیری تحویل سرویس"
+    start: order
+    states:
+      order: {prompt: "شناسه سفارش یا زمان خرید رو برام بنویس.", input: text, field: order_reference, next: proof}
+      proof: {prompt: "اگر رسید داری لطفاً عکسش رو هم بفرست.", input: photo, field: receipt_file_id, next: human}
+      human: {type: handoff}
