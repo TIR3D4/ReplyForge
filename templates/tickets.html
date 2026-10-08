@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="{{ locale }}" dir="{{ 'rtl' if locale == 'fa' else 'ltr' }}">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ReplyForge · Tickets</title>
+<style>
+:root{font-family:system-ui,-apple-system,sans-serif;color:#ecf5ff;background:#0c1424;color-scheme:dark}
+*{box-sizing:border-box}body{max-width:1280px;margin:auto;padding:24px}
+a{color:#a7e7f1}.panel{background:#18243b;border:1px solid #33445f;border-radius:16px;padding:18px;margin:16px 0;overflow:auto}
+form.filters{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+label{display:grid;gap:6px}input,select,button{font:inherit;color:#fff;background:#101b31;border:1px solid #405476;border-radius:9px;padding:10px}
+button{background:#16727b;cursor:pointer}table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:start;padding:11px;border-bottom:1px solid #34415a}
+.muted{color:#9eacc5}.tag{background:#2a3852;border-radius:7px;padding:5px 8px}
+.urgent{color:#ffafa0}.high{color:#f7cf86}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:14px}
+@media(max-width:650px){body{padding:12px}.panel{padding:10px}}
+</style></head><body>
+<a href="/admin">{{ '← داشبورد' if locale == 'fa' else '← Dashboard' }}</a>
+<h1>🎧 {{ 'صف تیکت‌های پشتیبانی' if locale == 'fa' else 'Support tickets' }}</h1>
+<p class="muted">{{ 'اولویت‌بندی و مدیریت تیکت‌ها' if locale == 'fa' else 'Triage and follow up on customer issues' }}</p>
+<section class="panel">
+<form class="filters" method="get" action="/admin/tickets">
+<label>{{ 'وضعیت' if locale == 'fa' else 'Status' }}
+<select name="ticket_status">{% for value,label in [('open','Active'),('in_progress','In progress'),('closed','Closed'),('all','All')] %}
+<option value="{{ value }}" {% if ticket_status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label>{{ 'اولویت' if locale == 'fa' else 'Priority' }}
+<select name="priority">{% for value in ['all','low','normal','high','urgent'] %}
+<option value="{{ value }}" {% if priority == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+<label>{{ 'جستجو' if locale == 'fa' else 'Search' }}<input name="search" value="{{ search }}" maxlength="64" placeholder="{{ 'شناسه یا دلیل' if locale == 'fa' else 'Chat ID / reason' }}"></label>
+<button>{{ 'فیلتر' if locale == 'fa' else 'Filter' }}</button></form>
+</section>
+<section class="panel">
+<div class="nav"><h2>{{ 'تیکت‌ها' if locale == 'fa' else 'Tickets' }} ({{ count }})</h2><span class="muted">{{ page }}/{{ pages }}</span></div>
+<table><thead><tr><th>#</th><th>Chat</th><th>{{ 'دلیل' if locale == 'fa' else 'Reason' }}</th>
+<th>{{ 'اولویت' if locale == 'fa' else 'Priority' }}</th><th>{{ 'مسئول' if locale == 'fa' else 'Assigned' }}</th>
+<th>{{ 'مهلت' if locale == 'fa' else 'SLA' }}</th><th>{{ 'وضعیت' if locale == 'fa' else 'Status' }}</th></tr></thead>
+<tbody>{% for t in tickets %}<tr>
+<td>#{{ t.id }}</td>
+<td><a href="/admin/conversations/{{ t.conversation_id }}">{{ conv_map[t.conversation_id].chat_id if t.conversation_id in conv_map else t.conversation_id }}</a></td>
+<td>{{ t.reason }}<br><small class="muted">{{ t.category }}</small></td>
+<td><strong class="{{ t.priority }}">{{ t.priority }}</strong>{% if t.escalated_at %} 🚨{% endif %}</td>
+<td>{{ t.assignee or '—' }}</td>
+<td>{{ t.sla_due_at or '—' }}</td>
+<td><span class="tag">{{ t.status }}</span></td>
+</tr>{% else %}<tr><td colspan="7">{{ 'موردی وجود ندارد' if locale == 'fa' else 'No tickets found' }}</td></tr>{% endfor %}</tbody>
+</table><div class="nav" style="margin-top:14px">
+{% if page > 1 %}<a href="?ticket_status={{ ticket_status }}&priority={{ priority }}&page={{ page-1 }}">{{ 'قبل' if locale == 'fa' else 'Previous' }}</a>{% else %}<span></span>{% endif %}
+{% if page < pages %}<a href="?ticket_status={{ ticket_status }}&priority={{ priority }}&page={{ page+1 }}">{{ 'بعد' if locale == 'fa' else 'Next' }}</a>{% endif %}
+</div></section>
+</body></html>
