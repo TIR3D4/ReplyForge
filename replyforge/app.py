@@ -21,12 +21,13 @@ from sqlalchemy.exc import IntegrityError
 from .config import ConfigError, Settings, load_playbook
 from .database import session_factory, session_scope
 from .models import (
-    Audit, Binding, Conversation, Event, Knowledge, Message, Outbox, Ticket, utcnow
+    Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, Message, Outbox, Ticket, utcnow
 )
 from .security import constant_time_equal, fingerprint
 from .playbooks import active_version, activate_version, effective_playbook, save_playbook
 from .models import PlaybookVersion
 from .telegram import TelegramClient
+from .worker import REPLY_WINDOW, _aware, auto_reply_enabled
 
 basic = HTTPBasic()
 templates = Jinja2Templates(directory="templates")
@@ -159,6 +160,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 "open_tickets": session.scalar(select(func.count(Ticket.id)).where(Ticket.status == "open")),
                 "sent_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status == "sent")),
                 "pending_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status.in_(("pending", "sending")))),
+                "auto_reply_enabled": auto_reply_enabled(session, request.app.state.settings),
             }
             current, revision = effective_playbook(session, request.app.state.playbook)
             return templates.TemplateResponse(request, "dashboard.html", {
@@ -178,9 +180,11 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             messages = session.scalars(select(Message).where(
                 Message.conversation_id == conversation_id,
             ).order_by(Message.id.desc()).limit(100)).all()
+            outbound = session.scalars(select(Outbox).where(Outbox.conversation_id == conversation_id,
+                Outbox.kind == "human").order_by(Outbox.id.desc()).limit(20)).all()
             current, _version = effective_playbook(session, request.app.state.playbook)
             return templates.TemplateResponse(request, "conversation.html", {
-                "conv": conv, "messages": list(reversed(messages)),
+                "conv": conv, "messages": list(reversed(messages)), "outbound": outbound,
                 "csrf": csrf_value(request),
                 "locale": current.get("locale", "en"),
                 "_": lambda en, fa: fa if current.get("locale") == "fa" else en,
@@ -267,6 +271,47 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 raise HTTPException(status_code=404, detail="Unknown version")
             session.add(Audit(actor="admin", action="playbook_restore", detail=str(version_id)))
         return RedirectResponse("/admin/playbook", status_code=303)
+
+    @app.post("/admin/automation")
+    def automation_toggle(request: Request, enabled: str = Form(...),
+                          csrf_token: str = Form(...), _=Depends(authenticate)):
+        csrf(request, csrf_token)
+        if enabled not in ("true", "false"):
+            raise HTTPException(status_code=422, detail="Invalid automation state")
+        with session_scope(request.app.state.factory) as session:
+            flag = session.get(Control, "auto_reply_enabled")
+            if flag is None:
+                session.add(Control(key="auto_reply_enabled", value=enabled))
+            else:
+                flag.value = enabled
+                flag.updated_at = utcnow()
+            session.add(Audit(actor="admin", action="automation_toggle", detail=enabled))
+        return RedirectResponse("/admin", status_code=303)
+
+    @app.post("/admin/conversations/{conversation_id}/reply")
+    def operator_reply(request: Request, conversation_id: int,
+                       message: str = Form(...), csrf_token: str = Form(...),
+                       _=Depends(authenticate)):
+        csrf(request, csrf_token)
+        if not message.strip() or len(message) > 3500:
+            raise HTTPException(status_code=422, detail="Message must be 1–3500 characters")
+        with session_scope(request.app.state.factory) as session:
+            conv = session.scalar(select(Conversation).where(
+                Conversation.id == conversation_id).with_for_update())
+            if conv is None:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            conn = session.get(BusinessConnection, conv.business_connection_id)
+            if not conn or not conn.enabled or not conn.can_reply:
+                raise HTTPException(status_code=409, detail="Telegram Business reply permission unavailable")
+            if not conv.last_inbound_at or utcnow() - _aware(conv.last_inbound_at) >= REPLY_WINDOW:
+                raise HTTPException(status_code=409, detail="Telegram Business reply window expired")
+            conv.owner = "human"
+            conv.revision += 1
+            session.add(Outbox(conversation_id=conv.id, revision=conv.revision,
+                               kind="human", text=message.strip(), buttons=[]))
+            session.add(Audit(conversation_id=conv.id, actor="operator",
+                              action="operator_reply_queued"))
+        return RedirectResponse(f"/admin/conversations/{conversation_id}", status_code=303)
 
     @app.post("/admin/conversations/{conversation_id}/takeover")
     def takeover(request: Request, conversation_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
