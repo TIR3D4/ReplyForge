@@ -15,9 +15,10 @@ from .models import (
     Audit, BusinessConnection, Conversation, Event, Message, Outbox, Ticket, utcnow
 )
 from .security import redact
+from .playbooks import effective_playbook
 from .telegram import TelegramClient, TelegramError
 from .workflow import (
-    accept_input, apply_action, build_markup, callback_action
+    accept_input, apply_action, build_markup, callback_action, root_menu
 )
 
 log = logging.getLogger(__name__)
@@ -176,6 +177,15 @@ class Processor:
         if not conn.enabled:
             return
         conv = get_conversation(session, conn, int(chat_id))
+        playbook, version = effective_playbook(session, self.playbook)
+        prior = (conv.state or {}).get("_playbook_version")
+        if conv.workflow and prior is not None and prior != version:
+            conv.workflow, conv.step, conv.state = None, None, {}
+            conv.revision += 1
+            if conv.owner == "ai" and conn.can_reply:
+                conv.state = {"_playbook_version": version}
+                save_proposal(session, conv, root_menu(playbook))
+            return
 
         if callback:
             if (callback.get("from") or {}).get("id") != conv.chat_id:
@@ -184,8 +194,9 @@ class Processor:
                 return
             action = callback_action(conv, str(callback.get("data") or ""))
             if action:
-                proposal = apply_action(session, conv, self.playbook, self._agent(session, conv), self.settings, action)
+                proposal = apply_action(session, conv, playbook, self._agent(session, conv), self.settings, action)
                 if conn.can_reply:
+                    conv.state = {**(conv.state or {}), "_playbook_version": version}
                     save_proposal(session, conv, proposal)
                     self._queue_operator_alert(session, conv)
             return
@@ -209,7 +220,8 @@ class Processor:
             document.get("file_id") if str(document.get("mime_type", "")).startswith("image/") else None
         )
         text = message.get("text") or message.get("caption") or ""
-        proposal = accept_input(session, conv, self.playbook, self._agent(session, conv), self.settings, text, file_id)
+        proposal = accept_input(session, conv, playbook, self._agent(session, conv), self.settings, text, file_id)
+        conv.state = {**(conv.state or {}), "_playbook_version": version}
         save_proposal(session, conv, proposal)
         self._queue_operator_alert(session, conv)
 
