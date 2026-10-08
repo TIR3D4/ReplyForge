@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import (
     Body, Depends, FastAPI, Form, Header, HTTPException, Request
 )
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -27,7 +27,7 @@ from .security import constant_time_equal, fingerprint, subscription_token_finge
 from .playbooks import active_version, activate_version, effective_playbook, save_playbook
 from .models import PlaybookVersion
 from .telegram import TelegramClient
-from .worker import REPLY_WINDOW, _aware, auto_reply_enabled
+from .worker import REPLY_WINDOW, _aware, auto_reply_enabled, worker_is_alive
 
 basic = HTTPBasic()
 templates = Jinja2Templates(directory="templates")
@@ -98,6 +98,20 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             session.execute(text("SELECT 1"))
         return {"status": "ok", "service": "replyforge"}
 
+    @app.get("/readyz")
+    def readyz(request: Request):
+        with session_scope(request.app.state.factory) as session:
+            session.execute(text("SELECT 1"))
+            ready = worker_is_alive(session)
+            pending = session.scalar(select(func.count(Event.update_id)).where(
+                Event.status.in_(("pending", "processing")))) or 0
+            dead = session.scalar(select(func.count(Event.update_id)).where(
+                Event.status == "dead")) or 0
+        return JSONResponse({"status": "ready" if ready else "degraded",
+                             "worker": "alive" if ready else "stale_or_missing",
+                             "pending_updates": pending, "dead_updates": dead},
+                            status_code=200 if ready else 503)
+
     @app.post("/telegram/webhook")
     def telegram_webhook(request: Request, payload: dict = Body(...),
                          telegram_secret: str | None = Header(default=None, alias="X-Telegram-Bot-Api-Secret-Token")):
@@ -164,6 +178,9 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 "sent_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status == "sent")),
                 "pending_messages": session.scalar(select(func.count(Outbox.id)).where(Outbox.status.in_(("pending", "sending")))),
                 "auto_reply_enabled": auto_reply_enabled(session, request.app.state.settings),
+                "worker_alive": worker_is_alive(session),
+                "dead_updates": session.scalar(select(func.count(Event.update_id)).where(
+                    Event.status == "dead")) or 0,
                 "positive_feedback": session.scalar(select(func.count(Audit.id)).where(
                     Audit.action == "feedback_positive")) or 0,
                 "negative_feedback": session.scalar(select(func.count(Audit.id)).where(
