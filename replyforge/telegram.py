@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
+from urllib.parse import quote
 import httpx
 
 
@@ -18,6 +20,7 @@ class TelegramError(Exception):
 
 class TelegramClient:
     def __init__(self, token: str, *, transport=None):
+        self.token = token
         self.client = httpx.Client(
             base_url="https://api.telegram.org/bot" + token + "/",
             timeout=httpx.Timeout(15, connect=5),
@@ -45,6 +48,32 @@ class TelegramClient:
                 retry_after=params.get("retry_after"),
             )
         return data.get("result")
+
+    def download(self, file_id: str, max_bytes: int) -> bytes:
+        """Fetch Telegram-owned file only; enforce size before and during streaming."""
+        if not file_id or len(file_id) > 512:
+            raise TelegramError("invalid_file_id", status=400)
+        result = self.call("getFile", {"file_id": file_id})
+        if not isinstance(result, dict):
+            raise TelegramError("invalid_file_response", status=502)
+        if int(result.get("file_size") or 0) > max_bytes:
+            raise TelegramError("file_too_large", status=413)
+        path = str(result.get("file_path") or "")
+        if (not path or len(path) > 300 or not re.fullmatch(r"[A-Za-z0-9_./-]+", path)
+                or ".." in path.split("/")):
+            raise TelegramError("invalid_telegram_file_path", status=400)
+        url = "https://api.telegram.org/file/bot" + self.token + "/" + quote(path, safe="/")
+        content = bytearray()
+        try:
+            with self.client.stream("GET", url) as response:
+                response.raise_for_status()
+                for chunk in response.iter_bytes():
+                    if len(content) + len(chunk) > max_bytes:
+                        raise TelegramError("file_too_large", status=413)
+                    content.extend(chunk)
+        except httpx.HTTPError as exc:
+            raise TelegramError("telegram_file_download_failed", status=502) from exc
+        return bytes(content)
 
     def get_connection(self, connection_id: str):
         return self.call("getBusinessConnection", {"business_connection_id": connection_id})
