@@ -158,6 +158,8 @@ def validate_playbook(config: Any) -> dict[str, Any]:
             for option in options:
                 if not isinstance(option, dict) or "label" not in option or "value" not in option:
                     raise ConfigError("Choice options require label and value")
+                if not isinstance(option["value"], str) or not isinstance(option["label"], str):
+                    raise ConfigError("Choice label and value must be quoted strings")
                 target = option.get("next", destination)
                 if target not in states:
                     raise ConfigError("Invalid option next " + str(target))
