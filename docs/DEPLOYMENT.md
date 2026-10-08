@@ -1,5 +1,7 @@
 # Operations & production deployment
 
+For the development branch, use the current [staging and upgrade runbook](UPGRADE_READINESS_BRANCH.md); schema head is `0010_operators`. Review [READINESS.md](READINESS.md) before activation.
+
 ## Before first launch
 
 - DNS A/AAAA for a host under your control.
@@ -53,7 +55,7 @@ Watch: incoming_events in dead status, outbox in uncertain or failed status, len
 
 ## Known constraints
 
-V1 uses an Alembic initial migration. The Compose init service applies pending migrations before starting API/worker; back up the database and rehearse version upgrades in staging. Do not bypass or downgrade a migration in production. In-flight Telegram send and human intervention can still race; the pre-send version check mitigates but cannot eliminate cross-service races.
+Schema evolution uses a forward Alembic migration chain. The Compose init service applies pending migrations before starting API/worker; back up the database and rehearse version upgrades in staging. Do not bypass or downgrade a migration in production. In-flight Telegram send and human intervention can still race; the pre-send version check mitigates but cannot eliminate cross-service races.
 
 ## Go-live checklist
 
@@ -101,7 +103,7 @@ DATA_RETENTION_DAYS defaults to 180 (0 disables). The worker periodically scrubs
 
 ## ReplyForge 1.1 upgrade and first-response SLA
 
-Read the step-by-step [upgrade guide](UPGRADE_V1_1.md). This release applies schema migrations 0005 through 0007 using the Compose init service. A database backup and staging restore test are required before a live migration.
+Read the step-by-step [upgrade guide](UPGRADE_V1_1.md). The original 1.1 candidate applied 0005–0007; this development branch additionally applies 0008–0010 using the Compose init service. A database backup and staging restore test are required before a live migration.
 
 Customer messages may be coalesced over MESSAGE_DEBOUNCE_MS; maintain only one worker. A queued operator reply is not counted as the first response until Telegram confirms delivery. The worker periodically checks unanswered SLAs independently from ongoing queue work.
 

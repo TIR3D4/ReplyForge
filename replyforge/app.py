@@ -71,6 +71,29 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         lifespan=lifespan,
     )
 
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    async def admin_error(request, status_code, message, headers=None):
+        playbook = request.app.state.playbook
+        return templates.TemplateResponse(request, "error.html", {
+            "locale": playbook.get("locale", "en"), "brand": playbook["brand"],
+            "status_code": status_code, "message": message,
+        }, status_code=status_code, headers=headers)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def readable_http_error(request, exc):
+        if request.url.path.startswith('/admin') and 'text/html' in request.headers.get('accept', ''):
+            return await admin_error(request, exc.status_code, str(exc.detail), exc.headers)
+        return await http_exception_handler(request, exc)
+
+    @app.exception_handler(RequestValidationError)
+    async def readable_validation_error(request, exc):
+        if request.url.path.startswith('/admin') and 'text/html' in request.headers.get('accept', ''):
+            return await admin_error(request, 422, "Some fields are missing or invalid. Review the form and try again.")
+        return await request_validation_exception_handler(request, exc)
+
     app.add_middleware(RequestBoundary)
     app.mount("/static", StaticFiles(directory="static"), name="static")
 

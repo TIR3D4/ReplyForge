@@ -49,3 +49,11 @@ Human-authored replies preserve FIFO order; later sends pause if an earlier send
 The authenticated erasure control requires exact confirmation and declines execution when a conversation has uncertain or in-flight outgoing delivery. It removes local conversation metadata, messages, tickets, notes, drafts, suggestions, related audit entries and chat-specific subscription bindings. It cannot erase Telegram message history, upstream panel data, third-party AI records or existing backup copies.
 
 DATA_RETENTION_DAYS defaults to 180 and controls scheduled content scrubbing of eligible historical messages, media references, staff notes, AI drafts, unreviewed knowledge candidates and completed ticket summaries. This preserves operational row structure and is not equivalent to deletion of every user identifier or every backup copy. Deployers remain responsible for informed consent and privacy compliance.
+
+## Readiness-branch security boundaries
+
+Staff accounts use scrypt hashes and administrator/operator route authorization. HTTP Basic still requires HTTPS and an external access/rate-control boundary; native MFA and session management are not implemented. Browser requests receive CSP, no-store admin responses, anti-framing and nosniff headers. Input byte limits apply before JSON/multipart parsing. These mitigations do not constitute an independent penetration audit.
+
+Insight uploads are parsed locally without archive extraction or external AI calls, with compressed/expanded size and entry limits. Candidate approval remains a trust decision: regex redaction does not prove anonymization. Online opt-in screenshot/voice processing is separate and sends selected original media to the configured provider; media misclassified into troubleshooting is not automatically redacted. Keep these opt-ins disabled if this violates your deployment's data policy.
+
+Idle historical workflow answers are scrubbed with retention; unresolved sends are preserved for reconciliation. Published knowledge, customer metadata, backups and external provider records require separate governance. Review [READINESS.md](docs/READINESS.md) for current residual risks.

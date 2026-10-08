@@ -16,6 +16,19 @@ def test_responsive_admin_and_policy_submission(database, test_settings, fake_te
     import uvicorn
     from replyforge.app import build_app
     settings = replace(test_settings, business_config='examples/azadbird.yaml' if locale == 'fa' else 'config/business.yaml')
+    from replyforge.database import session_scope
+    from replyforge.models import BusinessConnection, Conversation, Message, Ticket, utcnow
+    with session_scope(database) as db:
+        db.add(BusinessConnection(id='browser-synthetic', enabled=True, can_reply=True))
+        db.flush()
+        conv = Conversation(business_connection_id='browser-synthetic', chat_id=12345,
+                            owner='human', last_inbound_at=utcnow(), state={})
+        db.add(conv)
+        db.flush()
+        cid = conv.id
+        db.add(Ticket(conversation_id=cid, status='open', priority='high', category='connection'))
+        db.add(Message(conversation_id=cid, direction='in', kind='text',
+                       content='اتصال روی آیفون برقرار نمی‌شود. Please help me update my subscription.'))
     app = build_app(settings, factory=database, telegram=fake_telegram)
     sock = socket.socket()
     sock.bind(('127.0.0.1', 0))
@@ -34,7 +47,7 @@ def test_responsive_admin_and_policy_submission(database, test_settings, fake_te
             page.on('pageerror', lambda error: errors.append(str(error)))
             for width in [1440, 360]:
                 page.set_viewport_size({'width': width, 'height': 1000})
-                for path in ['/admin', '/admin/tickets', '/admin/agent', '/admin/insight', '/admin/operators', '/admin/connections', '/admin/playbook', '/admin/system']:
+                for path in ['/admin', '/admin/tickets', '/admin/agent', '/admin/insight', '/admin/operators', '/admin/connections', '/admin/playbook', '/admin/system', f'/admin/conversations/{cid}']:
                     response = page.goto(f'http://127.0.0.1:{port}{path}')
                     assert response.status == 200
                     assert page.locator('html').get_attribute('dir') == ('rtl' if locale == 'fa' else 'ltr')
