@@ -45,3 +45,19 @@ Review a conversation with redacted message history. Forms permit manual takeove
 - replyforge webhook-info — inspect Telegram registration.
 
 Healthcheck alone does not demonstrate end-to-end Telegram delivery. Perform a live customer-to-Business-account smoke test.
+
+
+### GET /readyz
+Checks PostgreSQL plus the processing Worker heartbeat. Returns HTTP 503 if the Worker is stale or missing, with pending/dead update counts.
+
+### POST /admin/automation
+Authenticated and CSRF-protected operation. Accepts enabled=true/false. New deployments start in monitor-only mode; the administrator must explicitly enable AI replies.
+
+### POST /admin/conversations/{id}/reply
+Sends a real operator reply from the connected Telegram Business account. Requires valid Telegram reply permission and a recent inbound message. Sends use the durable outbox and show confirmed/uncertain status in the conversation view.
+
+### Import existing subscriptions
+Run `replyforge sync-subscriptions --provider both --limit 2000` after configuring read-only panel credentials. The import reads `/api/users` in pages and stores both full-link and relay-compatible token HMAC values. No raw token or arbitrary customer URL is fetched. Providers can also be imported separately.
+
+### Media settings
+`AI_VISION_ENABLED` and `AI_VOICE_ENABLED` are opt-in. Downloads are limited by `AI_MEDIA_MAX_BYTES`; only screenshot diagnostics or transcription are sent to the selected AI provider. Financial receipts bypass model vision.
