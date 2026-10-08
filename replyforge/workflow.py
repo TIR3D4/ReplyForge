@@ -72,8 +72,14 @@ def _display_state(session: Session, conversation: Conversation, playbook: dict,
             conversation.workflow = None
             conversation.step = None
             return Proposal(answer, [("🏠 منوی اصلی" if is_fa(playbook) else "🏠 Main menu", "home")])
-        return Proposal(str(state.get("prompt", "Please provide the requested information.")),
-                        _choose_actions(playbook, state))
+        prompt = str(state.get("prompt", "Please provide the requested information."))
+        if conversation.step == "refresh":
+            app_name = str((conversation.state or {}).get("answers", {}).get("application", "")).casefold()
+            for app_key, guide in (playbook.get("tutorials") or {}).items():
+                if str(app_key).casefold() in app_name:
+                    prompt = str(guide) + "\n\n" + prompt
+                    break
+        return Proposal(prompt, _choose_actions(playbook, state))
     return human(session, conversation, playbook, reason="workflow_cycle")
 
 
@@ -138,7 +144,15 @@ def accept_input(session: Session, conv: Conversation, playbook: dict, ai: AIEng
     if not conv.workflow:
         action = ai.select_intent(redact(text), playbook["menu"]) if text else None
         if action:
-            return apply_action(session, conv, playbook, ai, settings, action)
+            proposal = apply_action(session, conv, playbook, ai, settings, action)
+            if action == "flow:question" and text.strip() and conv.workflow:
+                return accept_input(session, conv, playbook, ai, settings, text, photo_file_id)
+            return proposal
+        if text.strip():
+            entries = session.scalars(select(Knowledge).where(Knowledge.enabled.is_(True))).all()
+            answer = ai.knowledge_answer(text, entries)
+            if answer is not None:
+                return Proposal(answer, [("🏠 منوی اصلی" if is_fa(playbook) else "🏠 Menu", "home")])
         return root_menu(playbook)
 
     flow = playbook["workflows"][conv.workflow]

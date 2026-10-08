@@ -81,8 +81,8 @@ class Settings:
                 raise ConfigError("Secrets must be at least 16 characters")
         if obj.poll_seconds <= 0 or obj.lease_seconds < 20:
             raise ConfigError("Invalid worker intervals")
-        if not obj.webhook_path.startswith("/"):
-            raise ConfigError("WEBHOOK_PATH must start with /")
+        if obj.webhook_path != "/telegram/webhook":
+            raise ConfigError("V1 only supports WEBHOOK_PATH=/telegram/webhook")
         for name, url in (("AI_BASE_URL", obj.ai_base_url),
                           ("MARZBAN_BASE_URL", obj.marzban_base_url),
                           ("PASARGUARD_BASE_URL", obj.pasarguard_base_url)):
