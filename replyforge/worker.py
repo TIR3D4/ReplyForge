@@ -12,7 +12,7 @@ from .agent import AIEngine
 from .config import Settings, load_playbook
 from .database import claim, session_scope
 from .models import (
-    Audit, BusinessConnection, Conversation, Event, Message, Outbox, Ticket, utcnow
+    Audit, BusinessConnection, Conversation, Control, Event, Message, Outbox, Ticket, utcnow
 )
 from .security import redact
 from .playbooks import effective_playbook
@@ -24,6 +24,12 @@ from .workflow import (
 log = logging.getLogger(__name__)
 
 REPLY_WINDOW = timedelta(hours=23, minutes=50)
+
+
+def auto_reply_enabled(session: Session, settings: Settings) -> bool:
+    flag = session.get(Control, "auto_reply_enabled")
+    return flag.value == "true" if flag else settings.auto_reply_enabled
+
 
 
 def update_connection(session: Session, data: dict) -> BusinessConnection:
@@ -188,6 +194,8 @@ class Processor:
             return
 
         if callback:
+            if not auto_reply_enabled(session, self.settings):
+                return
             if (callback.get("from") or {}).get("id") != conv.chat_id:
                 return
             if conv.owner != "ai" or conv.menu_message_id != message.get("message_id"):
@@ -212,7 +220,7 @@ class Processor:
             return
         if not record_inbound(session, conv, message):
             return
-        if conv.owner != "ai" or not conn.can_reply:
+        if conv.owner != "ai" or not conn.can_reply or not auto_reply_enabled(session, self.settings):
             return
         photo = message.get("photo") or []
         document = message.get("document") or {}
@@ -279,10 +287,18 @@ class Processor:
             conv = session.get(Conversation, job.conversation_id)
             conn = session.get(BusinessConnection, conv.business_connection_id)
             is_alert = job.kind in ("alert", "alert_photo")
-            if (conv.revision != job.revision or
-                    (not is_alert and (not conn.enabled or not conn.can_reply
-                    or not conv.last_inbound_at or (utcnow() - _aware(conv.last_inbound_at)) >= REPLY_WINDOW
-                    or (conv.owner != "ai" and job.kind != "text")))):
+            recent_inbound = bool(conv.last_inbound_at and
+                                  utcnow() - _aware(conv.last_inbound_at) < REPLY_WINDOW)
+            if job.kind == "human":
+                correct_owner = conv.owner == "human"
+            elif job.kind == "text":
+                correct_owner = conv.owner == "human_pending"
+            else:
+                correct_owner = conv.owner == "ai" and auto_reply_enabled(session, self.settings)
+            permitted = is_alert or (
+                conn.enabled and conn.can_reply and recent_inbound and correct_owner
+            )
+            if conv.revision != job.revision or not permitted:
                 job.status = "cancelled"
                 job.error_code = "obsolete_or_not_permitted"
                 return
