@@ -88,3 +88,7 @@ Image interpretation and voice transcription are disabled until AI_VISION_ENABLE
 ## Worker readiness
 
 Check /readyz in addition to /healthz. A green /healthz only proves the web API can query the database; /readyz additionally requires a recent worker heartbeat. Monitor dead inbox events and uncertain outbox messages, and do not blindly resend uncertain deliveries.
+
+## Optional automatic VPN subscription catalog refresh
+
+After verifying both panel APIs and rate limits, run `docker compose --profile vpn up -d catalog` to enable the isolated, read-only `sync-daemon` service (default interval: 60 minutes, max users/provider 2000). It never mutates subscriptions, and failure of one panel does not block the Telegram worker or the other panel. Periodic sync status is retained in `controls`. Deploy only one catalog instance.
