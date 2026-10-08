@@ -481,7 +481,7 @@ class Processor:
             job = session.get(Outbox, outbox_id)
             if not job or job.status != "sending":
                 return
-            conv = session.get(Conversation, job.conversation_id)
+            conv = session.get(Conversation, job.conversation_id, with_for_update=True)
             conn = session.get(BusinessConnection, conv.business_connection_id)
             is_alert = job.kind in ("alert", "alert_photo")
             recent_inbound = bool(conv.last_inbound_at and
@@ -526,40 +526,38 @@ class Processor:
             markup = {"inline_keyboard": job.buttons} if job.buttons else None
             text = job.text
 
-        try:
-            message_id = None
-            if kind == "alert":
-                if self.settings.support_alert_chat_id is None:
-                    raise TelegramError("operator_alert_not_configured", status=400)
-                result = self.telegram.send_admin(self.settings.support_alert_chat_id, text)
-                message_id = result["message_id"]
-            elif kind == "alert_photo":
-                if self.settings.support_alert_chat_id is None:
-                    raise TelegramError("operator_alert_not_configured", status=400)
-                file_id = (job.buttons or [{}])[0].get("file_id")
-                if not file_id:
-                    raise TelegramError("missing_photo_id", status=400)
-                result = self.telegram.send_photo_admin(self.settings.support_alert_chat_id, file_id, text)
-                message_id = result["message_id"]
-            elif kind in ("menu", "handoff") and menu_id:
-                try:
-                    self.telegram.edit(connection_id, chat_id, menu_id, text, markup=markup)
-                    message_id = menu_id
-                except TelegramError as exc:
-                    if exc.status == 400 and "message is not modified" in exc.message.lower():
+            try:
+                message_id = None
+                if kind == "alert":
+                    if self.settings.support_alert_chat_id is None:
+                        raise TelegramError("operator_alert_not_configured", status=400)
+                    result = self.telegram.send_admin(self.settings.support_alert_chat_id, text)
+                    message_id = result["message_id"]
+                elif kind == "alert_photo":
+                    if self.settings.support_alert_chat_id is None:
+                        raise TelegramError("operator_alert_not_configured", status=400)
+                    file_id = (job.buttons or [{}])[0].get("file_id")
+                    if not file_id:
+                        raise TelegramError("missing_photo_id", status=400)
+                    result = self.telegram.send_photo_admin(self.settings.support_alert_chat_id, file_id, text)
+                    message_id = result["message_id"]
+                elif kind in ("menu", "handoff") and menu_id:
+                    try:
+                        self.telegram.edit(connection_id, chat_id, menu_id, text, markup=markup)
                         message_id = menu_id
-                    elif exc.status == 400 and not exc.uncertain:
-                        # Deleted/stale message: a fresh menu is safer than giving up.
-                        result = self.telegram.send(connection_id, chat_id, text, markup)
-                        message_id = result["message_id"]
-                    else:
-                        raise
-            else:
-                result = self.telegram.send(connection_id, chat_id, text, markup)
-                message_id = result["message_id"]
-        except TelegramError as exc:
-            with session_scope(self.factory) as session:
-                job = session.get(Outbox, outbox_id)
+                    except TelegramError as exc:
+                        if exc.status == 400 and "message is not modified" in exc.message.lower():
+                            message_id = menu_id
+                        elif exc.status == 400 and not exc.uncertain:
+                            # Deleted/stale message: a fresh menu is safer than giving up.
+                            result = self.telegram.send(connection_id, chat_id, text, markup)
+                            message_id = result["message_id"]
+                        else:
+                            raise
+                else:
+                    result = self.telegram.send(connection_id, chat_id, text, markup)
+                    message_id = result["message_id"]
+            except TelegramError as exc:
                 if exc.status == 429 and exc.retry_after and not exc.uncertain and job.attempts < 5:
                     job.status = "pending"
                     job.available_at = utcnow() + timedelta(seconds=max(1, int(exc.retry_after)) + 1)
@@ -567,17 +565,12 @@ class Processor:
                     job.status = "uncertain" if exc.uncertain else "failed"
                 job.error_code = "telegram_" + str(exc.status or "transport")
                 job.claimed_until = None
-            return
-        except (KeyError, TypeError, ValueError):
-            with session_scope(self.factory) as session:
-                job = session.get(Outbox, outbox_id)
+                return
+            except (KeyError, TypeError, ValueError):
                 job.status = "uncertain"
                 job.error_code = "missing_message_confirmation"
-            return
+                return
 
-        with session_scope(self.factory) as session:
-            job = session.get(Outbox, outbox_id)
-            conv = session.get(Conversation, job.conversation_id)
             job.status = "sent"
             job.telegram_message_id = message_id
             job.claimed_until = None

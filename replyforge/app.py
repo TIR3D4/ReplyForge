@@ -25,7 +25,7 @@ from .config import ConfigError, Settings, load_playbook
 from .database import session_factory, session_scope
 from .agent import AIEngine
 from .models import (
-    Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, KnowledgeSuggestion, Message, Outbox, Ticket, TicketNote, OperatorDraft, utcnow
+    Operator, Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, KnowledgeSuggestion, Message, Outbox, Ticket, TicketNote, OperatorDraft, utcnow
 )
 from .security import constant_time_equal, fingerprint, redact, subscription_token_fingerprint
 from .playbooks import active_version, activate_version, effective_playbook, save_playbook
@@ -81,9 +81,23 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         s = request.app.state.settings
         good_user = constant_time_equal(s.admin_username, credentials.username)
         good_password = constant_time_equal(s.admin_password, credentials.password)
-        if not (good_user and good_password):
+        role = "admin" if good_user and good_password else None
+        if role is None:
+            from .operators import verify_password
+            with session_scope(request.app.state.factory) as session:
+                staff = session.scalar(select(Operator).where(Operator.username == credentials.username))
+                if staff and staff.enabled and verify_password(credentials.password, staff.password_hash):
+                    role = staff.role
+        if role is None:
             raise HTTPException(status_code=401, detail="Invalid credentials",
                                 headers={"WWW-Authenticate": "Basic"})
+        request.state.role = role
+        if role != "admin":
+            from .operators import operator_route_allowed
+            if request.url.path == "/admin" and request.method == "GET":
+                raise HTTPException(status_code=303, headers={"Location": "/admin/tickets"})
+            if not operator_route_allowed(request.method, request.url.path):
+                raise HTTPException(403, detail="Administrator role required")
         return credentials.username
 
     def csrf(request: Request, submitted: str):

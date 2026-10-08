@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -167,28 +168,45 @@ def validate_playbook(config: Any) -> dict[str, Any]:
     workflows = config.get("workflows")
     if not isinstance(menu, list) or not isinstance(workflows, dict):
         raise ConfigError("Playbook requires menu list and workflows mapping")
+    if not 1 <= len(menu) <= 18 or len(workflows) > 50:
+        raise ConfigError("Use 1–18 menu entries and at most 50 workflows")
+    if not isinstance(config.get("welcome"), str) or not 1 <= len(config["welcome"]) <= 4000:
+        raise ConfigError("A welcome message of 1–4000 characters is required")
+    if config.get("locale", "en") not in ("fa", "en"):
+        raise ConfigError("Supported locales are fa and en")
     for button in menu:
         if not isinstance(button, dict) or not button.get("label") or not button.get("action"):
             raise ConfigError("Menu buttons require label and action")
+        if not isinstance(button['label'], str) or len(button['label']) > 80:
+            raise ConfigError("Menu label must be a string of up to 80 characters")
         action = button["action"]
         if not isinstance(action, str):
             raise ConfigError("Menu action must be a string")
         if action != "human" and not (action.startswith("flow:") and action[5:] in workflows):
             raise ConfigError("Invalid menu action: " + str(action))
     for name, flow in workflows.items():
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", name):
+            raise ConfigError("Invalid workflow name")
         if not isinstance(flow, dict) or not isinstance(flow.get("states"), dict):
             raise ConfigError("Workflow " + name + " requires states")
         states = flow["states"]
+        if not 1 <= len(states) <= 100 or any(not isinstance(key, str) for key in states):
+            raise ConfigError("Workflow states must have string keys, with 1–100 states")
         if flow.get("start") not in states:
             raise ConfigError("Workflow " + name + " missing start state")
         for step, state in states.items():
             if not isinstance(state, dict):
                 raise ConfigError("Invalid state " + step)
+            for field in ("prompt", "field"):
+                if field in state and (not isinstance(state[field], str) or len(state[field]) > 4000):
+                    raise ConfigError("Invalid state " + field)
             destination = state.get("next")
+            if state.get("type") is None and state.get("input") != "choice" and destination is None:
+                raise ConfigError("Input state requires next")
             if destination is not None and destination not in states:
                 raise ConfigError("Invalid next state " + str(destination))
             options = state.get("options", [])
-            if not isinstance(options, list):
+            if not isinstance(options, list) or len(options) > 18:
                 raise ConfigError("Options must be a list")
             if state.get("input") == "choice" and not options:
                 raise ConfigError("Choice state requires options")

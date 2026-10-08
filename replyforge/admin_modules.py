@@ -13,7 +13,7 @@ from .ai_policy import AIPolicy, effective_settings, policy_for, save_policy
 from .agent import AIEngine
 from .database import session_scope
 from .insight import analyze_export
-from .models import Audit, BusinessConnection, InsightImport, InsightCandidate, Knowledge, utcnow
+from .models import Operator, Audit, BusinessConnection, InsightImport, InsightCandidate, Knowledge, utcnow
 from .playbooks import effective_playbook
 from .security import redact, fingerprint
 
@@ -23,6 +23,47 @@ def register_admin_modules(app, authenticate, csrf, csrf_value, templates):
         playbook, _ = effective_playbook(session, request.app.state.playbook)
         return {'locale': playbook.get('locale', 'en'), 'brand': playbook['brand'],
                 'csrf': csrf_value(request)}
+
+    @app.get('/admin/operators')
+    def operators(request: Request, _=Depends(authenticate)):
+        with session_scope(request.app.state.factory) as session:
+            return templates.TemplateResponse(request, 'operators.html', {
+                **context(request, session), 'operators': session.scalars(select(Operator).order_by(Operator.id)).all()})
+
+    @app.post('/admin/operators')
+    def create_operator(request: Request, username: str = Form(...), password: str = Form(...),
+                        role: str = Form('operator'), csrf_token: str = Form(...), _=Depends(authenticate)):
+        import re
+        from .operators import hash_password
+        csrf(request, csrf_token)
+        if (not re.fullmatch(r'[A-Za-z0-9_.-]{3,80}', username)
+                or username == request.app.state.settings.admin_username or role not in ('admin', 'operator')):
+            raise HTTPException(422, detail='Invalid username or role')
+        try:
+            digest = hash_password(password)
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+        try:
+            with session_scope(request.app.state.factory) as session:
+                session.add(Operator(username=username, password_hash=digest, role=role))
+                session.add(Audit(actor='admin', action='operator_created'))
+        except IntegrityError as exc:
+            raise HTTPException(409, detail='Username already exists') from exc
+        return RedirectResponse('/admin/operators', 303)
+
+    @app.post('/admin/operators/{operator_id}/disable')
+    def disable_operator(request: Request, operator_id: int, csrf_token: str = Form(...),
+                         username=Depends(authenticate)):
+        csrf(request, csrf_token)
+        with session_scope(request.app.state.factory) as session:
+            staff = session.get(Operator, operator_id, with_for_update=True)
+            if not staff:
+                raise HTTPException(404)
+            if staff.username == username:
+                raise HTTPException(409, detail='Cannot disable your own account')
+            staff.enabled = False
+            session.add(Audit(actor='admin', action='operator_disabled', detail=str(staff.id)))
+        return RedirectResponse('/admin/operators', 303)
 
     @app.get('/admin/agent')
     def agent_settings(request: Request, _=Depends(authenticate)):

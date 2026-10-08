@@ -41,6 +41,8 @@ class RequestBoundary:
                                 (b"x-frame-options", b"DENY")])
                 if path.startswith("/admin") and not any(k.lower() == b"cache-control" for k, _ in headers):
                     headers.append((b"cache-control", b"private, no-store"))
+                if not any(k.lower() == b"content-security-policy" for k, _ in headers):
+                    headers.append((b"content-security-policy", b"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"))
                 message["headers"] = headers
             await send(message)
         await self.app(scope, bounded_receive, secure_send)

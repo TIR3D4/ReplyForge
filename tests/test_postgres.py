@@ -18,7 +18,7 @@ def test_postgres_migrations_and_queue():
     command.upgrade(config, "head")
     engine, factory = session_factory(url)
     with session_scope(factory) as session:
-        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0009_insight"
+        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0010_operators"
         session.add(BusinessConnection(
             id="ci-business", owner_user_id=555, enabled=True, can_reply=True,
         ))
