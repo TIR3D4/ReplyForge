@@ -18,7 +18,7 @@ def test_postgres_migrations_and_queue():
     command.upgrade(config, "head")
     engine, factory = session_factory(url)
     with session_scope(factory) as session:
-        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0010_operators"
+        assert session.scalar(text("SELECT version_num FROM alembic_version")) == "0011_release_runtime"
         session.add(BusinessConnection(
             id="ci-business", owner_user_id=555, enabled=True, can_reply=True,
         ))
@@ -130,4 +130,35 @@ def test_postgres_retention_scrubs_json_workflow_state():
         assert prune_history(db, 180)['conversation_state'] >= 1
     with session_scope(factory) as db:
         assert db.get(Conversation, cid).state == {}
+    engine.dispose()
+
+
+@pytest.mark.skipif(not os.getenv('TEST_POSTGRES_URL'), reason='No PostgreSQL configured')
+def test_postgres_budget_survives_support_rollback_and_serializes_reservations(test_settings):
+    from concurrent.futures import ThreadPoolExecutor
+    from dataclasses import replace
+    from decimal import Decimal
+    import uuid
+    from replyforge.budget import BudgetLedger
+    from replyforge.models import AIUsage, AIBudgetDay, Audit, utcnow
+    engine, factory = session_factory(os.environ['TEST_POSTGRES_URL'])
+    scope = 'test-' + uuid.uuid4().hex
+    cfg = replace(test_settings, ai_input_price='1', ai_output_price='1', ai_daily_budget_usd='10000',
+                  max_llm_calls_per_chat_per_day=100)
+    ledger = BudgetLedger(factory, cfg, scope)
+    with pytest.raises(RuntimeError):
+        with session_scope(factory) as db:
+            db.add(Audit(actor='test', action=scope)); db.flush()
+            reserved = ledger.reserve('synthetic', 1000, 0)
+            assert reserved
+            raise RuntimeError('Simulated support transition rollback')
+    with session_scope(factory) as db:
+        assert db.get(AIUsage, reserved).status == 'reserved'
+        assert db.scalar(select(Audit.id).where(Audit.action == scope)) is None
+        total = db.get(AIBudgetDay, utcnow().date().isoformat()).used_microusd
+    cfg = replace(cfg, ai_daily_budget_usd=str(Decimal(total + 6000)/Decimal(1_000_000)))
+    ledger = BudgetLedger(factory, cfg, scope)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: ledger.reserve('synthetic', 1000, 0), range(16)))
+    assert sum(bool(r) for r in results) == 6
     engine.dispose()

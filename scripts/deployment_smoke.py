@@ -39,11 +39,11 @@ def main():
         topology['services']['api']['ports'] = ['127.0.0.1::8080']
         compose = tmp/'compose.yml'
         compose.write_text(yaml.safe_dump(topology))
-        prefix = ['docker','compose','--project-name',project,'--env-file',str(env),'-f',str(compose)]
+        prefix = ['docker','compose','--project-name',project,'--env-file',str(env),'-f',str(compose),'--profile','insight']
         def run(*args, **kwargs):
             return subprocess.run([*prefix,*args], check=True, **kwargs)
         try:
-            run('up','-d','--build', 'api', 'worker')
+            run('up','-d','--build', 'api', 'worker', 'insight')
             port = run('port','api','8080',capture_output=True,text=True).stdout.strip().rsplit(':',1)[1]
             opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
             def wait_ready():
@@ -58,14 +58,15 @@ def main():
                     time.sleep(1)
                 raise RuntimeError('Worker did not become ready')
             wait_ready()
-            run('restart','worker','api')
+            run('restart','worker','api','insight')
             port = run('port','api','8080',capture_output=True,text=True).stdout.strip().rsplit(':',1)[1]
             wait_ready()
+            run('exec','-T','insight','replyforge','doctor')
             dump = run('exec','-T','db','pg_dump','-U','replyforge','-d','replyforge','-Fc',capture_output=True).stdout
             run('exec','-T','db','createdb','-U','replyforge','restore_check')
             run('exec','-T','db','pg_restore','-U','replyforge','-d','restore_check',input=dump)
             restored = run('exec','-T','db','psql','-U','replyforge','-d','restore_check','-Atc','SELECT version_num FROM alembic_version',capture_output=True,text=True).stdout.strip()
-            assert restored == '0010_operators', restored
+            assert restored == '0011_release_runtime', restored
             print('PASS: migrations, API/worker readiness, restart, dump and isolated restore')
         except Exception:
             run('ps', '--all')

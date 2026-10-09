@@ -18,7 +18,7 @@ from .syncer import run_periodically
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="replyforge")
-    parser.add_argument("command", choices=["init", "worker", "webhook-info", "set-webhook", "check-config", "sync-subscriptions", "sync-daemon", "prune"])
+    parser.add_argument("command", choices=["init", "worker", "webhook-info", "set-webhook", "check-config", "sync-subscriptions", "sync-daemon", "prune", "insight-worker", "doctor"])
     parser.add_argument("--provider", choices=["marzban", "pasarguard", "both"], default="both")
     parser.add_argument("--limit", type=int, default=2000, help="Maximum users per provider, up to 20000")
     parser.add_argument("--interval-minutes", type=int, default=60, help="sync-daemon polling interval (5-1440)")
@@ -30,11 +30,29 @@ def main() -> None:
         print("Valid playbook:", cfg["brand"], "workflows:", ", ".join(cfg["workflows"]))
         return
     engine, factory = session_factory(s.database_url)
+    if args.command == "doctor":
+        from sqlalchemy import text
+        from . import __version__
+        from .models import Control
+        print("ReplyForge", __version__)
+        print("Database:", engine.dialect.name)
+        with session_scope(factory) as db:
+            print("Migration:", db.scalar(text("SELECT version_num FROM alembic_version")))
+            heartbeat = db.get(Control, 'worker_heartbeat')
+            print("Worker heartbeat:", heartbeat.value if heartbeat else "not received")
+        print("External credentials: Telegram=", bool(s.bot_token), "AI=", bool(s.ai_api_key))
+        print("AI pricing configured:", float(s.ai_input_price)>0 and float(s.ai_output_price)>0)
+        print("No live messages or provider requests were made.")
+        return
     if args.command == "init":
         alembic_cfg = Config("alembic.ini")
         alembic_cfg.set_main_option("sqlalchemy.url", s.database_url.replace("%", "%%"))
         command.upgrade(alembic_cfg, "head")
         print("ReplyForge migrations up to date.")
+        return
+    if args.command == "insight-worker":
+        from .insight_worker import run
+        run(factory, s)
         return
     if args.command == "prune":
         with session_scope(factory) as db:

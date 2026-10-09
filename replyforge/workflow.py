@@ -53,7 +53,7 @@ def is_fa(playbook):
 
 def root_menu(playbook: dict) -> Proposal:
     return Proposal(
-        playbook["welcome"],
+        playbook["welcome"] + ("\n\n📣 " + playbook['service_notice'] if playbook.get('service_notice') else ''),
         [(button["label"], button["action"]) for button in playbook["menu"]],
     )
 

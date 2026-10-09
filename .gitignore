@@ -16,3 +16,6 @@ coverage.xml
 .DS_Store
 
 artifacts/
+backups/
+*.dump
+*.partial

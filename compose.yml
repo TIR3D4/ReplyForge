@@ -63,6 +63,22 @@ services:
       init:
         condition: service_completed_successfully
     restart: unless-stopped
+  insight:
+    profiles: ["insight"]
+    build: .
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    stop_grace_period: 30s
+    command: ["replyforge", "insight-worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://replyforge:${POSTGRES_PASSWORD}@db:5432/replyforge
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
   catalog:
     profiles: ["vpn"]
     build: .

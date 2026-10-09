@@ -51,6 +51,9 @@ class Settings:
     allow_http_panels: bool
     ai_fallback_model: str = ""
     ai_max_output_tokens: int = 250
+    ai_daily_budget_usd: str = "5"
+    ai_input_price: str = "0"
+    ai_output_price: str = "0"
     marzban_expected_version: str = ""
     pasarguard_expected_version: str = ""
 
@@ -84,6 +87,9 @@ class Settings:
             ai_api_key=g("AI_API_KEY"),
             ai_base_url=g("AI_BASE_URL", "https://api.openai.com/v1"),
             ai_model=g("AI_MODEL", "gpt-4.1-mini"),
+            ai_daily_budget_usd=g("AI_DAILY_BUDGET_USD", "5"),
+            ai_input_price=g("AI_INPUT_PRICE_PER_MILLION", "0"),
+            ai_output_price=g("AI_OUTPUT_PRICE_PER_MILLION", "0"),
             ai_fallback_model=g("AI_FALLBACK_MODEL"),
             ai_max_output_tokens=int(g("AI_MAX_OUTPUT_TOKENS", "250")),
             marzban_base_url=g("MARZBAN_BASE_URL"),
@@ -112,6 +118,13 @@ class Settings:
         for version in (obj.marzban_expected_version, obj.pasarguard_expected_version):
             if version and not re.fullmatch(r"v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", version):
                 raise ConfigError("Panel expected version must be an exact semantic version")
+        from decimal import Decimal, InvalidOperation
+        for value in (obj.ai_daily_budget_usd, obj.ai_input_price, obj.ai_output_price):
+            try:
+                if not Decimal(value).is_finite() or not 0 <= Decimal(value) <= 10000:
+                    raise ValueError()
+            except (InvalidOperation, ValueError):
+                raise ConfigError("AI budget/prices must be finite amounts between 0 and 10000")
         if not 32 <= obj.ai_max_output_tokens <= 2000:
             raise ConfigError("AI_MAX_OUTPUT_TOKENS must be 32–2000")
         if obj.support_alert_chat_id == 0:

@@ -47,7 +47,7 @@ def test_responsive_admin_and_policy_submission(database, test_settings, fake_te
             page.on('pageerror', lambda error: errors.append(str(error)))
             for width in [1440, 360]:
                 page.set_viewport_size({'width': width, 'height': 1000})
-                for path in ['/admin', '/admin/tickets', '/admin/agent', '/admin/insight', '/admin/operators', '/admin/connections', '/admin/playbook', '/admin/system', f'/admin/conversations/{cid}']:
+                for path in ['/admin', '/admin/tickets', '/admin/inbox', '/admin/agent', '/admin/insight', '/admin/operators', '/admin/connections', '/admin/playbook', '/admin/system', f'/admin/conversations/{cid}']:
                     response = page.goto(f'http://127.0.0.1:{port}{path}')
                     assert response.status == 200
                     assert page.locator('html').get_attribute('dir') == ('rtl' if locale == 'fa' else 'ltr')

@@ -13,7 +13,7 @@ from .ai_policy import AIPolicy, effective_settings, policy_for, save_policy
 from .agent import AIEngine
 from .database import session_scope
 from .insight import analyze_export
-from .models import Operator, Audit, BusinessConnection, InsightImport, InsightCandidate, Knowledge, utcnow
+from .models import AIBudgetDay, AIUsage, Control, InsightTask, Operator, Audit, BusinessConnection, InsightImport, InsightCandidate, Knowledge, utcnow
 from .playbooks import effective_playbook
 from .security import redact, fingerprint
 
@@ -49,6 +49,36 @@ def register_admin_modules(app, authenticate, csrf, csrf_value, templates):
             except (ConfigError, ValueError) as exc:
                 raise HTTPException(422, detail=str(exc)) from exc
             session.add(Audit(actor='admin', action='workflow_step_edited', detail=str(version.id)))
+        return RedirectResponse('/admin/playbook', 303)
+
+    @app.post('/admin/playbook/create-flow')
+    def create_workflow(request: Request, name: str = Form(...), title: str = Form(...),
+                        prompt: str = Form(...), csrf_token: str = Form(...), _=Depends(authenticate)):
+        from .workflow_builder import create_flow
+        return change_flow(request, csrf_token, lambda current: create_flow(current, name, title, prompt))
+
+    @app.post('/admin/playbook/build-step')
+    def build_step(request: Request, flow: str = Form(...), step: str = Form(...),
+                   kind: str = Form(...), prompt: str = Form(''), field: str = Form(''),
+                   target: str = Form(''), start: bool = Form(False),
+                   option_value: list[str] = Form([]), option_label: list[str] = Form([]),
+                   option_target: list[str] = Form([]), csrf_token: str = Form(...), _=Depends(authenticate)):
+        from .workflow_builder import save_step
+        return change_flow(request, csrf_token, lambda current: save_step(current, flow, step, kind,
+                           prompt, field, target, option_value, option_label, option_target, start))
+
+    def change_flow(request, token, mutate):
+        import yaml
+        from .playbooks import save_playbook
+        csrf(request, token)
+        try:
+            with session_scope(request.app.state.factory) as db:
+                current, _ = effective_playbook(db, request.app.state.playbook)
+                updated = mutate(current)
+                version = save_playbook(db, yaml.safe_dump(updated, allow_unicode=True, sort_keys=False))
+                db.add(Audit(actor='admin', action='workflow_builder_saved', detail=str(version.id)))
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
         return RedirectResponse('/admin/playbook', 303)
 
     @app.get('/admin/operators')
@@ -92,6 +122,23 @@ def register_admin_modules(app, authenticate, csrf, csrf_value, templates):
             session.add(Audit(actor='admin', action='operator_disabled', detail=str(staff.id)))
         return RedirectResponse('/admin/operators', 303)
 
+    @app.post('/admin/operators/{operator_id}/password')
+    def reset_operator_password(request: Request, operator_id: int, password: str = Form(...),
+                                csrf_token: str = Form(...), _=Depends(authenticate)):
+        from .operators import hash_password
+        csrf(request, csrf_token)
+        try:
+            digest = hash_password(password)
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+        with session_scope(request.app.state.factory) as db:
+            staff = db.get(Operator, operator_id, with_for_update=True)
+            if not staff:
+                raise HTTPException(404)
+            staff.password_hash = digest
+            db.add(Audit(actor='admin', action='operator_password_rotated', detail=str(staff.id)))
+        return RedirectResponse('/admin/operators', 303)
+
     @app.get('/admin/agent')
     def agent_settings(request: Request, _=Depends(authenticate)):
         with session_scope(request.app.state.factory) as session:
@@ -103,11 +150,13 @@ def register_admin_modules(app, authenticate, csrf, csrf_value, templates):
     def update_agent(request: Request, csrf_token: str = Form(...),
                      model: str = Form(...), fallback_model: str = Form(''),
                      max_output_tokens: int = Form(...), calls_per_chat_per_day: int = Form(...),
+                     daily_budget_usd: str = Form('5'), input_price: str = Form('0'), output_price: str = Form('0'),
                      vision_enabled: bool = Form(False), voice_enabled: bool = Form(False),
                      _=Depends(authenticate)):
         csrf(request, csrf_token)
         try:
             policy = AIPolicy(model=model, fallback_model=fallback_model,
+                              daily_budget_usd=daily_budget_usd, input_price=input_price, output_price=output_price,
                               max_output_tokens=max_output_tokens, calls_per_chat_per_day=calls_per_chat_per_day,
                               vision_enabled=vision_enabled, voice_enabled=voice_enabled)
         except ValidationError as exc:
@@ -139,25 +188,42 @@ def register_admin_modules(app, authenticate, csrf, csrf_value, templates):
                 session.add(Audit(actor='admin', action='playground_call'))
                 session.flush()
                 return True
-            ai = AIEngine(settings, allow_call=permit)
+            from .budget import BudgetLedger
+            ai = AIEngine(settings, allow_call=permit,
+                          ledger=BudgetLedger(request.app.state.factory, settings, 'playground'))
             action = ai.select_intent(text, playbook['menu'])
             result = action or 'NONE — choose a menu or request human assistance'
             return templates.TemplateResponse(request, 'agent.html', {
                 **context(request, session), 'policy': policy_for(session, settings),
                 'provider_configured': bool(settings.ai_api_key), 'result': result})
 
+    @app.post('/admin/service-notice')
+    def set_service_notice(request: Request, message: str = Form(''), csrf_token: str = Form(...), _=Depends(authenticate)):
+        from .models import Control
+        csrf(request, csrf_token)
+        if len(message) > 200:
+            raise HTTPException(422, detail='Notice must be at most 200 characters')
+        with session_scope(request.app.state.factory) as db:
+            row = db.get(Control, 'service_notice')
+            if row is None:
+                db.add(Control(key='service_notice', value=message.strip()))
+            else:
+                row.value, row.updated_at = message.strip(), utcnow()
+            db.add(Audit(actor='admin', action='service_notice_updated'))
+        return RedirectResponse('/admin/connections', 303)
+
     @app.get('/admin/connections')
     def connections(request: Request, _=Depends(authenticate)):
         with session_scope(request.app.state.factory) as session:
             return templates.TemplateResponse(request, 'connections.html', {
                 **context(request, session), 'connections': session.scalars(select(BusinessConnection)).all(),
-                'settings': request.app.state.settings})
+                'settings': request.app.state.settings, 'notice': session.get(Control, 'service_notice')})
 
     @app.get('/admin/system')
     def system(request: Request, _=Depends(authenticate)):
         with session_scope(request.app.state.factory) as session:
             return templates.TemplateResponse(request, 'system.html', {
-                **context(request, session), 'events': session.scalars(select(Audit).order_by(Audit.id.desc()).limit(100)).all()})
+                **context(request, session), 'events': session.scalars(select(Audit).order_by(Audit.id.desc()).limit(100)).all(), 'budget_days': session.scalars(select(AIBudgetDay).order_by(AIBudgetDay.day.desc()).limit(7)).all(), 'usage': session.scalars(select(AIUsage).order_by(AIUsage.created_at.desc()).limit(30)).all()})
 
     @app.get('/admin/insight')
     def insight_dashboard(request: Request, import_id: int | None = None, _=Depends(authenticate)):
@@ -168,7 +234,7 @@ def register_admin_modules(app, authenticate, csrf, csrf_value, templates):
                 InsightCandidate.import_id == current.id, InsightCandidate.status == 'pending'
             ).order_by(InsightCandidate.id).limit(50)).all() if current else []
             return templates.TemplateResponse(request, 'insight.html', {
-                **context(request, session), 'imports': imports, 'current': current, 'candidates': candidates})
+                **context(request, session), 'imports': imports, 'current': current, 'candidates': candidates, 'tasks': {t.candidate_id: t for t in session.scalars(select(InsightTask).where(InsightTask.import_id == current.id)).all()} if current else {}})
 
     @app.post('/admin/insight/import')
     async def import_insight(request: Request, export: UploadFile = File(...),
@@ -205,6 +271,56 @@ def register_admin_modules(app, authenticate, csrf, csrf_value, templates):
             raise HTTPException(409, detail='Export already imported; refresh Insight') from exc
         return RedirectResponse('/admin/insight?import_id=' + str(job_id), 303)
 
+    @app.post('/admin/insight/{candidate_id}/refine')
+    def refine_candidate(request: Request, candidate_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
+        csrf(request, csrf_token)
+        with session_scope(request.app.state.factory) as db:
+            candidate = db.get(InsightCandidate, candidate_id, with_for_update=True)
+            if not candidate or candidate.status != 'pending':
+                raise HTTPException(409, detail='Only pending candidates can be analyzed')
+            task = db.scalar(select(InsightTask).where(InsightTask.candidate_id == candidate_id))
+            if task:
+                if task.status not in ('failed','uncertain'):
+                    raise HTTPException(409, detail='Task already queued or awaiting review')
+                task.status, task.result = 'pending', {}
+            else:
+                db.add(InsightTask(import_id=candidate.import_id, candidate_id=candidate.id))
+            job_id = candidate.import_id
+            db.add(Audit(actor='admin', action='insight_refinement_requested', detail=str(candidate_id)))
+        return RedirectResponse('/admin/insight?import_id=' + str(job_id), 303)
+
+    @app.post('/admin/insight/tasks/{task_id}/publish-workflow')
+    def publish_learned_workflow(request: Request, task_id: int, name: str = Form(...),
+                                  title: str = Form(...), steps: str = Form(...),
+                                  csrf_token: str = Form(...), _=Depends(authenticate)):
+        import yaml
+        from .workflow_builder import create_flow, save_step
+        from .playbooks import save_playbook
+        csrf(request, csrf_token)
+        lines = [line.strip() for line in steps.splitlines() if line.strip()]
+        if not 1 <= len(lines) <= 8 or any(len(line) > 500 for line in lines):
+            raise HTTPException(422, detail='Provide 1–8 reviewed steps, up to 500 characters each')
+        try:
+            with session_scope(request.app.state.factory) as db:
+                task = db.get(InsightTask, task_id, with_for_update=True)
+                if not task or task.status != 'review':
+                    raise HTTPException(409, detail='Task is not awaiting review')
+                current, _ = effective_playbook(db, request.app.state.playbook)
+                changed = create_flow(current, name, title, lines[0])
+                # Build backwards so every transition is valid at each save.
+                for index in reversed(range(len(lines))):
+                    step = 'step_' + str(index)
+                    destination = 'complete' if index == len(lines)-1 else 'step_' + str(index+1)
+                    labels = ['انجام شد', 'کمک اپراتور'] if current.get('locale') == 'fa' else ['Done', 'Human help']
+                    changed = save_step(changed, name, step, 'choice', lines[index], 'step_' + str(index), '',
+                                        ['done','help'], labels, [destination,'handoff'], start=index == 0)
+                save_playbook(db, yaml.safe_dump(changed, allow_unicode=True, sort_keys=False))
+                task.status = 'published'
+                db.add(Audit(actor='admin', action='insight_workflow_approved', detail=str(task.id)))
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+        return RedirectResponse('/admin/playbook', 303)
+
     @app.post('/admin/insight/{candidate_id}/review')
     def review_insight(request: Request, candidate_id: int, decision: str = Form(...),
                        question: str = Form(''), answer: str = Form(''),
@@ -238,6 +354,7 @@ def register_admin_modules(app, authenticate, csrf, csrf_value, templates):
             job = session.get(InsightImport, import_id, with_for_update=True)
             if not job:
                 raise HTTPException(404)
+            session.execute(delete(InsightTask).where(InsightTask.import_id == import_id))
             session.execute(delete(InsightCandidate).where(InsightCandidate.import_id == import_id))
             session.delete(job)
             session.add(Audit(actor='admin', action='insight_erased'))

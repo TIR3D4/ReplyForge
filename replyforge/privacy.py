@@ -6,7 +6,7 @@ from sqlalchemy import select, func, exists, cast, String
 from sqlalchemy.orm import Session
 
 from .models import (
-    Conversation, InsightCandidate, KnowledgeSuggestion, Message, OperatorDraft, Outbox, Ticket, TicketNote, utcnow,
+    Conversation, InsightTask, InsightCandidate, KnowledgeSuggestion, Message, OperatorDraft, Outbox, Ticket, TicketNote, utcnow,
 )
 
 EXPIRED = "[expired]"
@@ -80,6 +80,9 @@ def prune_history(session: Session, retention_days: int, *, batch_size: int = 25
         item.question, item.answer = EXPIRED, EXPIRED
         item.digest = "expired"
         item.status = "expired"
+        task = session.scalar(select(InsightTask).where(InsightTask.candidate_id == item.id))
+        if task:
+            task.result, task.status = {}, 'expired'
     counts["insight_candidates"] = len(candidates)
     # Workflow answers/media references also contain customer data. Preserve
     # states involved in unresolved sends and recent conversations; scrub idle

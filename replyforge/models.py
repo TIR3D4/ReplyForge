@@ -209,3 +209,43 @@ class Operator(Base):
     role: Mapped[str] = mapped_column(String(16), default='operator', nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AIBudgetDay(Base):
+    __tablename__ = 'ai_budget_days'
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)
+    used_microusd: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+
+
+class AIUsage(Base):
+    __tablename__ = 'ai_usage'
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    day: Mapped[str] = mapped_column(String(10), index=True, nullable=False)
+    scope: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    reserved_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    charged_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    input_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    output_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    input_price: Mapped[str] = mapped_column(String(30), nullable=False)
+    output_price: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InsightTask(Base):
+    __tablename__ = 'insight_tasks'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    import_id: Mapped[int] = mapped_column(ForeignKey('insight_imports.id'), index=True, nullable=False)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey('insight_candidates.id'), unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default='pending', nullable=False)
+    result: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class LoginBucket(Base):
+    __tablename__ = 'login_buckets'
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

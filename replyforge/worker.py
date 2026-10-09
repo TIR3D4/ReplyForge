@@ -160,7 +160,9 @@ class Processor:
             session.flush()
             return True
 
-        return AIEngine(configured, allow_call=permit_call)
+        from .budget import BudgetLedger
+        return AIEngine(configured, allow_call=permit_call,
+                        ledger=BudgetLedger(self.factory, configured, f"chat:{conv.id}"))
 
     def _process_payload(self, session: Session, payload: dict,
                          *, batch_messages: list[dict] | None = None) -> None:
@@ -218,6 +220,9 @@ class Processor:
             return
         conv = get_conversation(session, conn, int(chat_id))
         playbook, version = effective_playbook(session, self.playbook)
+        notice = session.get(Control, 'service_notice')
+        if notice and notice.value:
+            playbook = {**playbook, 'service_notice': notice.value}
         prior = (conv.state or {}).get("_playbook_version")
         if conv.workflow and prior is not None and prior != version:
             conv.workflow, conv.step, conv.state = None, None, {}
@@ -309,6 +314,23 @@ class Processor:
             for item in accepted_messages
         )[:MAX_BATCH_CHARACTERS]
         ai = self._agent(session, conv)
+        # Use bounded structured reasoning for ambiguous free text, keeping all
+        # tool execution and customer-facing claims in deterministic workflows.
+        from .agent import local_intent
+        if (text and not conv.workflow and ai.settings.ai_api_key
+                and local_intent(text, set(playbook['workflows'])) is None):
+            from .support_reasoning import understand
+            history = list(reversed(session.scalars(select(Message).where(
+                Message.conversation_id == conv.id,
+            ).order_by(Message.id.desc()).limit(6)).all()))
+            decision = understand(ai, text, history, playbook['menu'])
+            if decision and decision.action != 'NONE':
+                slots = {k: v for k, v in {'device': decision.device, 'application': decision.application}.items() if v}
+                conv.state = {**(conv.state or {}), 'recent_slots': {**(conv.state or {}).get('recent_slots', {}), **slots}, '_playbook_version': version}
+                proposal = apply_action(session, conv, playbook, ai, self.settings, decision.action)
+                save_proposal(session, conv, proposal)
+                self._queue_operator_alert(session, conv)
+                return
         voice = message.get("voice") or message.get("audio") or {}
         if isinstance(voice, dict) and voice.get("file_id"):
             try:
@@ -408,12 +430,15 @@ class Processor:
             Ticket.status.in_(("open", "in_progress")),
         ))
         if ticket:
+            answers = (conv.state or {}).get('answers', {})
+            summary = '\n'.join(f'{k}: {redact(str(v))[:100]}' for k, v in answers.items()
+                                if not any(x in k.casefold() for x in ('photo','receipt','file','image')))[:700]
             session.add(Outbox(
                 conversation_id=conv.id, revision=conv.revision,
                 kind="alert", text=f"🎧 ReplyForge ticket #{ticket.id}\n"
                 f"Customer chat: {conv.chat_id}\n"
                 f"Reason: {ticket.reason} | Priority: {ticket.priority}\n"
-                f"Review in /admin/conversations/{conv.id}",
+                f"Collected context: {summary}\nReview in /admin/conversations/{conv.id}",
                 buttons=[],
             ))
             from_date = (conv.state or {}).get("flow_started_at")

@@ -28,7 +28,7 @@ def verify_password(password: str, encoded: str) -> bool:
 
 def operator_route_allowed(method: str, path: str) -> bool:
     if method == 'GET':
-        return path == '/admin/tickets' or bool(re.fullmatch(r'/admin/(conversations|media)/\d+', path))
+        return path in ('/admin/tickets', '/admin/inbox') or bool(re.fullmatch(r'/admin/(conversations|media)/\d+', path))
     if method != 'POST':
         return False
     return bool(re.fullmatch(r'/admin/(?:conversations/\d+/(?:reply|suggest|takeover|resume|draft/\d+/dismiss)|tickets/\d+/(?:triage|notes|close|reopen))', path))

@@ -67,7 +67,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 engine.dispose()
 
     app = FastAPI(
-        title="ReplyForge", version="1.1.0rc1", docs_url=None, redoc_url=None,
+        title="ReplyForge", version="1.2.0rc1", docs_url=None, redoc_url=None,
         lifespan=lifespan,
     )
 
@@ -102,6 +102,11 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
 
     def authenticate(request: Request, credentials: HTTPBasicCredentials = Depends(basic)):
         s = request.app.state.settings
+        from .login_guard import attempt, success
+        throttle_key = attempt(request.app.state.factory,
+                               request.client.host if request.client else 'unknown', s.binding_pepper)
+        if throttle_key is None:
+            raise HTTPException(429, detail="Too many login attempts; retry in five minutes", headers={"Retry-After": "300"})
         good_user = constant_time_equal(s.admin_username, credentials.username)
         good_password = constant_time_equal(s.admin_password, credentials.password)
         role = "admin" if good_user and good_password else None
@@ -114,6 +119,8 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         if role is None:
             raise HTTPException(status_code=401, detail="Invalid credentials",
                                 headers={"WWW-Authenticate": "Basic"})
+        success(request.app.state.factory, throttle_key)
+        request.state.username = credentials.username
         request.state.role = role
         if role != "admin":
             from .operators import operator_route_allowed
@@ -594,7 +601,9 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 session.flush()
                 return True
 
-            ai = AIEngine(settings, allow_call=allow_call)
+            from .budget import BudgetLedger
+            ai = AIEngine(settings, allow_call=allow_call,
+                          ledger=BudgetLedger(request.app.state.factory, settings, f"chat:{conversation_id}"))
             proposed, source = ai.operator_draft(
                 history, knowledge, locale=locale,
                 ticket_reason=ticket.category if ticket else "",
@@ -640,7 +649,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
     @app.post("/admin/conversations/{conversation_id}/reply")
     def operator_reply(request: Request, conversation_id: int,
                        message: str = Form(...), csrf_token: str = Form(...),
-                       draft_id: int | None = Form(None),
+                       draft_id: int | None = Form(None), return_to: str = Form(''),
                        _=Depends(authenticate)):
         csrf(request, csrf_token)
         if not message.strip() or len(message) > 3500:
@@ -926,6 +935,8 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                               action="ticket_closed", detail=str(ticket.id)))
         return RedirectResponse("/admin/tickets", status_code=303)
 
+    from .inbox import register_inbox
+    register_inbox(app, authenticate, csrf_value, templates)
     from .admin_modules import register_admin_modules
     register_admin_modules(app, authenticate, csrf, csrf_value, templates)
     return app
