@@ -47,7 +47,7 @@ def test_retention_scrubs_text_and_file_ids_but_not_recent_records(database):
         result = prune_history(db, retention_days=180)
         assert result == {
             "messages": 1, "outbox": 1, "notes": 1, "drafts": 1, "suggestions": 1,
-            "ticket_summaries": 1,
+            "ticket_summaries": 1, "insight_candidates": 0, "conversation_state": 0,
         }
     with session_scope(database) as db:
         messages = db.scalars(select(Message).order_by(Message.id)).all()
@@ -69,3 +69,26 @@ def test_retention_scrubs_text_and_file_ids_but_not_recent_records(database):
 def test_retention_can_be_disabled(database):
     with session_scope(database) as db:
         assert not any(prune_history(db, 0).values())
+
+
+def test_retention_scrubs_idle_workflow_answers_but_preserves_uncertain_delivery(database):
+    old = utcnow() - timedelta(days=200)
+    with session_scope(database) as db:
+        db.add(BusinessConnection(id='retention', enabled=True, can_reply=True))
+        db.flush()
+        for chat in (1, 2):
+            conv = Conversation(business_connection_id='retention', chat_id=chat,
+                owner='human', state={'answers': {'reference': 'private'}, 'file_id': 'old-file'},
+                workflow='payment', step='receipt', menu_message_id=123,
+                last_inbound_at=old, created_at=old)
+            db.add(conv)
+            db.flush()
+            if chat == 2:
+                db.add(Outbox(conversation_id=conv.id, revision=0, text='unresolved', status='uncertain'))
+    with session_scope(database) as db:
+        assert prune_history(db, 180)['conversation_state'] == 1
+    with session_scope(database) as db:
+        one, two = db.scalars(select(Conversation).order_by(Conversation.chat_id)).all()
+        assert one.state == {} and one.workflow is None and one.menu_message_id is None
+        assert one.owner == 'human' and one.revision == 1
+        assert two.state['answers']['reference'] == 'private'

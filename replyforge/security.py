@@ -8,12 +8,18 @@ from urllib.parse import unquote, urlsplit
 
 CONFIG_LINK = re.compile(r"(?i)(?:https?://[^\s<>]+|(?:vless|vmess|trojan|ss|hysteria2|hy2|tuic|wg)://[^\s<>]+)")
 BANK_CARD = re.compile(r"(?<!\d)\d{13,19}(?!\d)")
+EMAIL = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+PHONE = re.compile(r"(?<!\w)(?:\+?\d[\s().-]*){10,19}(?!\w)")
+HANDLE = re.compile(r"(?<!\w)@[A-Za-z0-9_]{3,}")
 TOKEN = re.compile(r"(?i)(?:bearer|token|password|secret)[ \t]*[:=][ \t]*\S+")
 
 
 def redact(text: str) -> str:
     cleaned = CONFIG_LINK.sub("[redacted link]", text or "")
     cleaned = BANK_CARD.sub("[redacted number]", cleaned)
+    cleaned = EMAIL.sub("[redacted email]", cleaned)
+    cleaned = PHONE.sub("[redacted number]", cleaned)
+    cleaned = HANDLE.sub("[redacted handle]", cleaned)
     return TOKEN.sub("[redacted credential]", cleaned)[:4000]
 
 

@@ -1,0 +1,5 @@
+{% extends 'base.html' %}{% block content %}
+<section class="panel"><span class="eyebrow">{{ status_code }}</span><h1>{{ 'درخواست انجام نشد' if fa else 'Request could not be completed' }}</h1>
+<p>{{ 'فرم و دسترسی حساب را بررسی کنید. تغییر ناموفق ذخیره نشده است.' if fa else 'Check your form and account permissions. The rejected change was not saved.' }}</p>
+<p class="warn" dir="auto">{{ message }}</p><a class="button" href="/admin/tickets">{{ 'بازگشت به صندوق پشتیبانی' if fa else 'Return to support inbox' }}</a>
+</section>{% endblock %}

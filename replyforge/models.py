@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, JSON,
-    String, Text, UniqueConstraint
+    String, Text, UniqueConstraint, LargeBinary
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -65,6 +65,7 @@ class Outbox(Base):
     __tablename__ = "outbox"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     conversation_id: Mapped[int] = mapped_column(Integer, ForeignKey("conversations.id"), nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     kind: Mapped[str] = mapped_column(String(16), default="menu")
     text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -176,3 +177,76 @@ class Control(Base):
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
     value: Mapped[str] = mapped_column(String(200), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InsightImport(Base):
+    __tablename__ = "insight_imports"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    statistics: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InsightCandidate(Base):
+    __tablename__ = "insight_candidates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    import_id: Mapped[int] = mapped_column(ForeignKey("insight_imports.id"), nullable=False, index=True)
+    digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    question: Mapped[str] = mapped_column(String(500), nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    media_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Operator(Base):
+    __tablename__ = 'operators'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    role: Mapped[str] = mapped_column(String(16), default='operator', nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AIBudgetDay(Base):
+    __tablename__ = 'ai_budget_days'
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)
+    used_microusd: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+
+
+class AIUsage(Base):
+    __tablename__ = 'ai_usage'
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    day: Mapped[str] = mapped_column(String(10), index=True, nullable=False)
+    scope: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    reserved_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    charged_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    input_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    output_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    input_price: Mapped[str] = mapped_column(String(30), nullable=False)
+    output_price: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class InsightTask(Base):
+    __tablename__ = 'insight_tasks'
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    import_id: Mapped[int] = mapped_column(ForeignKey('insight_imports.id'), index=True, nullable=False)
+    candidate_id: Mapped[int] = mapped_column(ForeignKey('insight_candidates.id'), unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default='pending', nullable=False)
+    image_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    result: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class LoginBucket(Base):
+    __tablename__ = 'login_buckets'
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

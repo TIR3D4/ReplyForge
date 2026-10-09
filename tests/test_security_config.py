@@ -46,7 +46,7 @@ def test_quota_normalization():
     })
     assert s.remaining_bytes == 50
     assert s.expires_at is None
-    assert normalize("marzban", {"data_limit": 0}).remaining_bytes is None
+    assert normalize("marzban", {"status": "active", "used_traffic": 0, "data_limit": 0, "expire": None}).remaining_bytes is None
 
 
 def test_ai_fallback_never_creates_payment_confirmation(test_settings):

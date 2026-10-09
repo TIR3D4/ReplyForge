@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -48,6 +49,13 @@ class Settings:
     pasarguard_base_url: str
     pasarguard_api_key: str
     allow_http_panels: bool
+    ai_fallback_model: str = ""
+    ai_max_output_tokens: int = 250
+    ai_daily_budget_usd: str = "5"
+    ai_input_price: str = "0"
+    ai_output_price: str = "0"
+    marzban_expected_version: str = ""
+    pasarguard_expected_version: str = ""
 
     @classmethod
     def from_env(cls, *, strict: bool = True) -> "Settings":
@@ -79,7 +87,14 @@ class Settings:
             ai_api_key=g("AI_API_KEY"),
             ai_base_url=g("AI_BASE_URL", "https://api.openai.com/v1"),
             ai_model=g("AI_MODEL", "gpt-4.1-mini"),
+            ai_daily_budget_usd=g("AI_DAILY_BUDGET_USD", "5"),
+            ai_input_price=g("AI_INPUT_PRICE_PER_MILLION", "0"),
+            ai_output_price=g("AI_OUTPUT_PRICE_PER_MILLION", "0"),
+            ai_fallback_model=g("AI_FALLBACK_MODEL"),
+            ai_max_output_tokens=int(g("AI_MAX_OUTPUT_TOKENS", "250")),
             marzban_base_url=g("MARZBAN_BASE_URL"),
+            marzban_expected_version=g("MARZBAN_EXPECTED_VERSION"),
+            pasarguard_expected_version=g("PASARGUARD_EXPECTED_VERSION"),
             marzban_username=g("MARZBAN_USERNAME"),
             marzban_password=g("MARZBAN_PASSWORD"),
             pasarguard_base_url=g("PASARGUARD_BASE_URL"),
@@ -100,6 +115,18 @@ class Settings:
             if min(len(obj.webhook_secret), len(obj.admin_password),
                    len(obj.binding_pepper), len(obj.internal_api_key)) < 16:
                 raise ConfigError("Secrets must be at least 16 characters")
+        for version in (obj.marzban_expected_version, obj.pasarguard_expected_version):
+            if version and not re.fullmatch(r"v?\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", version):
+                raise ConfigError("Panel expected version must be an exact semantic version")
+        from decimal import Decimal, InvalidOperation
+        for value in (obj.ai_daily_budget_usd, obj.ai_input_price, obj.ai_output_price):
+            try:
+                if not Decimal(value).is_finite() or not 0 <= Decimal(value) <= 10000:
+                    raise ValueError()
+            except (InvalidOperation, ValueError):
+                raise ConfigError("AI budget/prices must be finite amounts between 0 and 10000")
+        if not 32 <= obj.ai_max_output_tokens <= 2000:
+            raise ConfigError("AI_MAX_OUTPUT_TOKENS must be 32–2000")
         if obj.support_alert_chat_id == 0:
             raise ConfigError("SUPPORT_ALERT_CHAT_ID must be a non-zero Telegram chat ID")
         if not 65536 <= obj.media_max_bytes <= 10485760:
@@ -161,28 +188,45 @@ def validate_playbook(config: Any) -> dict[str, Any]:
     workflows = config.get("workflows")
     if not isinstance(menu, list) or not isinstance(workflows, dict):
         raise ConfigError("Playbook requires menu list and workflows mapping")
+    if not 1 <= len(menu) <= 18 or len(workflows) > 50:
+        raise ConfigError("Use 1–18 menu entries and at most 50 workflows")
+    if not isinstance(config.get("welcome"), str) or not 1 <= len(config["welcome"]) <= 4000:
+        raise ConfigError("A welcome message of 1–4000 characters is required")
+    if config.get("locale", "en") not in ("fa", "en"):
+        raise ConfigError("Supported locales are fa and en")
     for button in menu:
         if not isinstance(button, dict) or not button.get("label") or not button.get("action"):
             raise ConfigError("Menu buttons require label and action")
+        if not isinstance(button['label'], str) or len(button['label']) > 80:
+            raise ConfigError("Menu label must be a string of up to 80 characters")
         action = button["action"]
         if not isinstance(action, str):
             raise ConfigError("Menu action must be a string")
         if action != "human" and not (action.startswith("flow:") and action[5:] in workflows):
             raise ConfigError("Invalid menu action: " + str(action))
     for name, flow in workflows.items():
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", name):
+            raise ConfigError("Invalid workflow name")
         if not isinstance(flow, dict) or not isinstance(flow.get("states"), dict):
             raise ConfigError("Workflow " + name + " requires states")
         states = flow["states"]
+        if not 1 <= len(states) <= 100 or any(not isinstance(key, str) for key in states):
+            raise ConfigError("Workflow states must have string keys, with 1–100 states")
         if flow.get("start") not in states:
             raise ConfigError("Workflow " + name + " missing start state")
         for step, state in states.items():
             if not isinstance(state, dict):
                 raise ConfigError("Invalid state " + step)
+            for field in ("prompt", "field"):
+                if field in state and (not isinstance(state[field], str) or len(state[field]) > 4000):
+                    raise ConfigError("Invalid state " + field)
             destination = state.get("next")
+            if state.get("type") is None and state.get("input") != "choice" and destination is None:
+                raise ConfigError("Input state requires next")
             if destination is not None and destination not in states:
                 raise ConfigError("Invalid next state " + str(destination))
             options = state.get("options", [])
-            if not isinstance(options, list):
+            if not isinstance(options, list) or len(options) > 18:
                 raise ConfigError("Options must be a list")
             if state.get("input") == "choice" and not options:
                 raise ConfigError("Choice state requires options")

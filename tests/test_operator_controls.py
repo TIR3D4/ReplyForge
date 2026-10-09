@@ -216,3 +216,15 @@ def test_uncertain_reply_blocks_next_until_explicit_reconciliation(
         next_job.available_at = utcnow() - timedelta(seconds=1)
     assert proc.tick()
     assert [item[2] for item in fake_telegram.sent] == ["دومی"]
+
+
+def test_browser_validation_errors_are_readable_and_api_errors_remain_json(database, test_settings, fake_telegram):
+    from fastapi.testclient import TestClient
+    from replyforge.app import build_app
+    with TestClient(build_app(test_settings, factory=database, telegram=fake_telegram)) as client:
+        client.auth = (test_settings.admin_username, test_settings.admin_password)
+        response = client.post('/admin/agent', headers={'Accept': 'text/html'}, data={})
+        assert response.status_code == 422
+        assert 'text/html' in response.headers['content-type']
+        assert '<h1>' in response.text
+        assert client.post('/admin/agent', data={}).headers['content-type'] == 'application/json'

@@ -1,12 +1,13 @@
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md requirements.lock ./
 COPY replyforge ./replyforge
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir -r requirements.lock && pip install --no-cache-dir --no-deps .
 COPY config ./config
 COPY examples ./examples
 COPY templates ./templates
+COPY static ./static
 COPY alembic.ini ./alembic.ini
 COPY migrations ./migrations
 RUN useradd -r -u 10001 replyforge

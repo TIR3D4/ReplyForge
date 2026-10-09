@@ -129,3 +129,13 @@ def test_payment_adjacent_receipt_never_calls_vision(database, test_settings, fa
     fake_telegram.files["bank-receipt"] = bytes.fromhex("ffd8ff") + b"example"
     Processor(settings, database, fake_telegram).process_event(785)
     assert called == []
+
+
+def test_malformed_provider_media_results_fail_closed(test_settings):
+    import httpx
+    from dataclasses import replace
+    from replyforge.agent import AIEngine
+    settings = replace(test_settings, ai_api_key='synthetic', vision_enabled=True, voice_enabled=True)
+    engine = AIEngine(settings, transport=httpx.MockTransport(lambda _: httpx.Response(200,json=[])))
+    assert engine.describe_screenshot(b'\xff\xd8\xffsynthetic') is None
+    assert engine.transcribe_voice(b'OggS-synthetic') is None

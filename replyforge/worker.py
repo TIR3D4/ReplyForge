@@ -3,14 +3,17 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import logging
+import signal
+import threading
 import time
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .agent import AIEngine
+from .ai_policy import effective_settings
 from .config import Settings, load_playbook
-from .database import claim, session_scope
+from .database import claim, session_scope, exclusive_worker
 from .models import (
     Audit, BusinessConnection, Conversation, Control, Event, Message, Outbox, Ticket, utcnow
 )
@@ -119,19 +122,29 @@ def record_inbound(session: Session, conv: Conversation, message: dict) -> bool:
         direction="in", content=redact(text), kind=kind,
         data={"file_id": file_id} if file_id else {},
     ))
-    conv.last_inbound_at = utcnow()
+    # Telegram's timestamp, not processing time, defines the reply window.
+    stamp = message.get("date")
+    try:
+        received = datetime.fromtimestamp(stamp, timezone.utc) if type(stamp) is int else utcnow()
+    except (ValueError, OverflowError, OSError):
+        received = datetime.fromtimestamp(0, timezone.utc)
+    received = min(received, utcnow())
+    if conv.last_inbound_at is None or received > _aware(conv.last_inbound_at):
+        conv.last_inbound_at = received
     return True
 
 
 class Processor:
     def __init__(self, settings: Settings, factory, telegram: TelegramClient):
         self.settings = settings
+        self.stop_requested = threading.Event()
         self.factory = factory
         self.telegram = telegram
         self.playbook = load_playbook(settings.business_config)
 
     def _agent(self, session: Session, conv: Conversation) -> AIEngine:
         """Create a chat-scoped model budget and audit every attempted model call."""
+        configured = effective_settings(session, self.settings)
         def permit_call() -> bool:
             if not self.settings.ai_api_key:
                 return False
@@ -141,13 +154,15 @@ class Processor:
                 Audit.action == "ai_call",
                 Audit.created_at >= since,
             )) or 0
-            if used >= self.settings.max_llm_calls_per_chat_per_day:
+            if used >= configured.max_llm_calls_per_chat_per_day:
                 return False
             session.add(Audit(conversation_id=conv.id, actor="system", action="ai_call"))
             session.flush()
             return True
 
-        return AIEngine(self.settings, allow_call=permit_call)
+        from .budget import BudgetLedger
+        return AIEngine(configured, allow_call=permit_call,
+                        ledger=BudgetLedger(self.factory, configured, f"chat:{conv.id}"))
 
     def _process_payload(self, session: Session, payload: dict,
                          *, batch_messages: list[dict] | None = None) -> None:
@@ -205,6 +220,9 @@ class Processor:
             return
         conv = get_conversation(session, conn, int(chat_id))
         playbook, version = effective_playbook(session, self.playbook)
+        notice = session.get(Control, 'service_notice')
+        if notice and notice.value:
+            playbook = {**playbook, 'service_notice': notice.value}
         prior = (conv.state or {}).get("_playbook_version")
         if conv.workflow and prior is not None and prior != version:
             conv.workflow, conv.step, conv.state = None, None, {}
@@ -262,13 +280,25 @@ class Processor:
                 existing.updated_at = utcnow()
             session.add(Audit(conversation_id=conv.id, actor="owner", action="takeover"))
             return
+        newest_id = session.scalar(select(func.max(Message.telegram_message_id)).where(
+            Message.conversation_id == conv.id, Message.direction == "in",
+        ))
         if not record_inbound(session, conv, message):
             return
+        if newest_id is not None and message["message_id"] < newest_id:
+            session.add(Audit(conversation_id=conv.id, actor="system",
+                              action="late_message_archived"))
+            # A coalesced batch may still contain newer input. Do not mark that
+            # input done without processing it when its first message was late.
+            if batch_messages:
+                self._process_payload(session, {"business_message": batch_messages[0]},
+                                      batch_messages=batch_messages[1:])
+            return  # Keep evidence; never feed late input into a newer workflow step.
         # Persist each constituent message independently. Only the prompt/context
         # is combined; Telegram message IDs and attachments remain traceable.
         accepted_messages = [message]
         for item in batch_messages or []:
-            if record_inbound(session, conv, item):
+            if record_inbound(session, conv, item) and item.get("message_id", 0) > accepted_messages[-1]["message_id"]:
                 accepted_messages.append(item)
         if conv.owner != "ai" or not conn.can_reply or not auto_reply_enabled(session, self.settings):
             if conv.owner in ("human", "human_pending"):
@@ -284,6 +314,23 @@ class Processor:
             for item in accepted_messages
         )[:MAX_BATCH_CHARACTERS]
         ai = self._agent(session, conv)
+        # Use bounded structured reasoning for ambiguous free text, keeping all
+        # tool execution and customer-facing claims in deterministic workflows.
+        from .agent import local_intent
+        if (text and not conv.workflow and ai.settings.ai_api_key
+                and local_intent(text, set(playbook['workflows'])) is None):
+            from .support_reasoning import understand
+            history = list(reversed(session.scalars(select(Message).where(
+                Message.conversation_id == conv.id,
+            ).order_by(Message.id.desc()).limit(6)).all()))
+            decision = understand(ai, text, history, playbook['menu'])
+            if decision and decision.action != 'NONE':
+                slots = {k: v for k, v in {'device': decision.device, 'application': decision.application}.items() if v}
+                conv.state = {**(conv.state or {}), 'recent_slots': {**(conv.state or {}).get('recent_slots', {}), **slots}, '_playbook_version': version}
+                proposal = apply_action(session, conv, playbook, ai, self.settings, decision.action)
+                save_proposal(session, conv, proposal)
+                self._queue_operator_alert(session, conv)
+                return
         voice = message.get("voice") or message.get("audio") or {}
         if isinstance(voice, dict) and voice.get("file_id"):
             try:
@@ -311,7 +358,7 @@ class Processor:
         )
         # Financial/payment evidence is NEVER sent to third-party vision APIs.
         if (file_id and not photo_expected and conv.workflow == "connection"
-                and self.settings.vision_enabled):
+                and ai.settings.vision_enabled):
             try:
                 content = self.telegram.download(str(file_id), self.settings.media_max_bytes)
                 observation = ai.describe_screenshot(content)
@@ -383,12 +430,15 @@ class Processor:
             Ticket.status.in_(("open", "in_progress")),
         ))
         if ticket:
+            answers = (conv.state or {}).get('answers', {})
+            summary = '\n'.join(f'{k}: {redact(str(v))[:100]}' for k, v in answers.items()
+                                if not any(x in k.casefold() for x in ('photo','receipt','file','image')))[:700]
             session.add(Outbox(
                 conversation_id=conv.id, revision=conv.revision,
                 kind="alert", text=f"🎧 ReplyForge ticket #{ticket.id}\n"
                 f"Customer chat: {conv.chat_id}\n"
                 f"Reason: {ticket.reason} | Priority: {ticket.priority}\n"
-                f"Review in /admin/conversations/{conv.id}",
+                f"Collected context: {summary}\nReview in /admin/conversations/{conv.id}",
                 buttons=[],
             ))
             from_date = (conv.state or {}).get("flow_started_at")
@@ -439,13 +489,15 @@ class Processor:
                 # never coalesced with a customer message or discarded.
                 if key[2] != (conn.owner_user_id if conn else None):
                     next_events = session.scalars(select(Event).where(
-                        Event.status == "pending",
+                        Event.status.in_(("pending", "processing")),
                         Event.update_id > update_id,
                     ).order_by(Event.update_id).limit(MAX_TEXT_BATCH).with_for_update(
                         skip_locked=True,
                     )).all()
                     total = len(source["text"])
                     for next_event in next_events:
+                        if next_event.status != "pending" or next_event.attempts:
+                            break
                         incoming = (next_event.payload or {}).get("business_message")
                         if not self._batchable(incoming):
                             break
@@ -471,7 +523,7 @@ class Processor:
             job = session.get(Outbox, outbox_id)
             if not job or job.status != "sending":
                 return
-            conv = session.get(Conversation, job.conversation_id)
+            conv = session.get(Conversation, job.conversation_id, with_for_update=True)
             conn = session.get(BusinessConnection, conv.business_connection_id)
             is_alert = job.kind in ("alert", "alert_photo")
             recent_inbound = bool(conv.last_inbound_at and
@@ -511,62 +563,56 @@ class Processor:
             connection_id = conn.id
             chat_id = conv.chat_id
             menu_id = conv.menu_message_id
+            job.attempts += 1
             kind = job.kind
             markup = {"inline_keyboard": job.buttons} if job.buttons else None
             text = job.text
 
-        try:
-            message_id = None
-            if kind == "alert":
-                if self.settings.support_alert_chat_id is None:
-                    raise TelegramError("operator_alert_not_configured", status=400)
-                result = self.telegram.send_admin(self.settings.support_alert_chat_id, text)
-                message_id = result["message_id"]
-            elif kind == "alert_photo":
-                if self.settings.support_alert_chat_id is None:
-                    raise TelegramError("operator_alert_not_configured", status=400)
-                file_id = (job.buttons or [{}])[0].get("file_id")
-                if not file_id:
-                    raise TelegramError("missing_photo_id", status=400)
-                result = self.telegram.send_photo_admin(self.settings.support_alert_chat_id, file_id, text)
-                message_id = result["message_id"]
-            elif kind in ("menu", "handoff") and menu_id:
-                try:
-                    self.telegram.edit(connection_id, chat_id, menu_id, text, markup=markup)
-                    message_id = menu_id
-                except TelegramError as exc:
-                    if exc.status == 400 and "message is not modified" in exc.message.lower():
+            try:
+                message_id = None
+                if kind == "alert":
+                    if self.settings.support_alert_chat_id is None:
+                        raise TelegramError("operator_alert_not_configured", status=400)
+                    result = self.telegram.send_admin(self.settings.support_alert_chat_id, text)
+                    message_id = result["message_id"]
+                elif kind == "alert_photo":
+                    if self.settings.support_alert_chat_id is None:
+                        raise TelegramError("operator_alert_not_configured", status=400)
+                    file_id = (job.buttons or [{}])[0].get("file_id")
+                    if not file_id:
+                        raise TelegramError("missing_photo_id", status=400)
+                    result = self.telegram.send_photo_admin(self.settings.support_alert_chat_id, file_id, text)
+                    message_id = result["message_id"]
+                elif kind in ("menu", "handoff") and menu_id:
+                    try:
+                        self.telegram.edit(connection_id, chat_id, menu_id, text, markup=markup)
                         message_id = menu_id
-                    elif exc.status == 400 and not exc.uncertain:
-                        # Deleted/stale message: a fresh menu is safer than giving up.
-                        result = self.telegram.send(connection_id, chat_id, text, markup)
-                        message_id = result["message_id"]
-                    else:
-                        raise
-            else:
-                result = self.telegram.send(connection_id, chat_id, text, markup)
-                message_id = result["message_id"]
-        except TelegramError as exc:
-            with session_scope(self.factory) as session:
-                job = session.get(Outbox, outbox_id)
-                if exc.retry_after and not exc.uncertain:
+                    except TelegramError as exc:
+                        if exc.status == 400 and "message is not modified" in exc.message.lower():
+                            message_id = menu_id
+                        elif exc.status == 400 and not exc.uncertain:
+                            # Deleted/stale message: a fresh menu is safer than giving up.
+                            result = self.telegram.send(connection_id, chat_id, text, markup)
+                            message_id = result["message_id"]
+                        else:
+                            raise
+                else:
+                    result = self.telegram.send(connection_id, chat_id, text, markup)
+                    message_id = result["message_id"]
+            except TelegramError as exc:
+                if exc.status == 429 and exc.retry_after and not exc.uncertain and job.attempts < 5:
                     job.status = "pending"
-                    job.available_at = utcnow() + timedelta(seconds=min(int(exc.retry_after) + 1, 300))
+                    job.available_at = utcnow() + timedelta(seconds=max(1, int(exc.retry_after)) + 1)
                 else:
                     job.status = "uncertain" if exc.uncertain else "failed"
                 job.error_code = "telegram_" + str(exc.status or "transport")
                 job.claimed_until = None
-            return
-        except (KeyError, TypeError, ValueError):
-            with session_scope(self.factory) as session:
-                job = session.get(Outbox, outbox_id)
+                return
+            except (KeyError, TypeError, ValueError):
                 job.status = "uncertain"
                 job.error_code = "missing_message_confirmation"
-            return
+                return
 
-        with session_scope(self.factory) as session:
-            job = session.get(Outbox, outbox_id)
-            conv = session.get(Conversation, job.conversation_id)
             job.status = "sent"
             job.telegram_message_id = message_id
             job.claimed_until = None
@@ -659,11 +705,26 @@ class Processor:
                 row.updated_at = utcnow()
 
     def run(self):
+        previous = {}
+        if threading.current_thread() is threading.main_thread():
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                previous[sig] = signal.signal(sig, lambda *_: self.stop_requested.set())
+        try:
+            with exclusive_worker(self.factory.kw["bind"]) as guard:
+                self._run_loop(guard)
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+
+    def _run_loop(self, guard=None):
         log.info("ReplyForge worker started")
         next_heartbeat = 0.0
         next_privacy_sweep = 0.0
         next_sla_sweep = 0.0
-        while True:
+        while not self.stop_requested.is_set():
+            if guard is not None:
+                guard.execute(text("SELECT 1"))
+                guard.commit()
             now = time.monotonic()
             if now >= next_sla_sweep:
                 try:
@@ -685,7 +746,7 @@ class Processor:
                     log.exception("Privacy retention scrub failed")
                 next_privacy_sweep = now + 6 * 3600
             if not self.tick():
-                time.sleep(self.settings.poll_seconds)
+                self.stop_requested.wait(self.settings.poll_seconds)
 
 
 def _aware(value: datetime):

@@ -1,5 +1,7 @@
 # Upgrade guide: ReplyForge 1.0.0rc1 → 1.1.0rc1
 
+Historical guide for the original release candidate. For `development/production-readiness` and migrations through 0010, use [UPGRADE_READINESS_BRANCH.md](UPGRADE_READINESS_BRANCH.md).
+
 This release improves customer support operations while retaining the same official Telegram Business Bot API connection and self-hosted topology.
 
 ## Checklist before updating

@@ -12,17 +12,20 @@ The core is a **modular monolith**, not a swarm of untrusted autonomous agents.
 
 ### Data flow
 
-~~~text
-Telegram Business -> FastAPI webhook -> incoming_events -> Worker
-                                          |                 |
-                                     PostgreSQL        State machine
-                                          |          /   |    \   \
-                                          |       FAQs  AI  providers human
-                                          |                 |
-                                    Outbox <--------------+
-                                          |
-                                    Telegram Bot API
-~~~
+```mermaid
+flowchart TD
+    T["Telegram Business"] --> W["Authenticated webhook"]
+    W --> I["PostgreSQL inbox"]
+    I --> S["Single worker / state machine"]
+    S --> A["Bounded AI selection"]
+    S --> P["Read-only panel adapters"]
+    S --> H["Human ticket inbox"]
+    A --> O["Durable outbox"]
+    P --> O
+    H --> O
+    O --> T
+```
+
 
 ## State and concurrency
 
@@ -78,3 +81,14 @@ Human messages are intentional sends: multiple queued operator messages preserve
 The inbox can combine adjacent short text-only messages from the same customer into a single model interaction, while retaining each constituent message for auditing. Media, owner-authored messages, and intervening other chat events break the batch. A single worker is still required until per-chat distributed fencing is implemented and tested.
 
 Human operators can generate review-only suggested replies. No automatic Telegram send occurs. Resolved tickets may produce unpublished FAQ candidates: separate operator approval is required before they can answer customer requests. The application supports bounded retention scrubbing and an authenticated, explicitly confirmed local erasure operation, but not removal of outside Telegram history or old backups.
+
+## Readiness-branch changes
+
+- PostgreSQL session advisory lock rejects a second worker. The inbox is globally ordered including retry backoff and unexpired leases. Late older customer message IDs are archived without changing a newer workflow. Throughput is deliberately limited by this topology.
+- Delivery retains a conversation row lock through the bounded external request and finalization. Administrative ownership changes use the same lock. Telegram-side manual messages are only known once received/processed: no cross-system atomicity is claimed.
+- SIGTERM/SIGINT stop new claims and drain the current iteration. If forced termination occurs mid-send, existing uncertainty recovery still applies.
+- Migrations through `0010_operators` add delivery attempts, historical-import candidates and separate hashed staff identities.
+- Insight is a separate offline preprocessing/review module. No model or archived image is sent externally by Insight. Approval copies a reviewed candidate into active knowledge; raw imports are not retained.
+- The admin shell is server-rendered Jinja with shared CSS and a small theme/submit-feedback script, preserving the existing VPS-friendly deployment without a separate frontend service.
+
+See [READINESS.md](READINESS.md) for phase coverage and residual risks; model-call counting is not a transaction-independent financial ledger.

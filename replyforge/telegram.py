@@ -40,7 +40,12 @@ class TelegramClient:
             data = response.json()
         except (ValueError, TypeError) as exc:
             raise TelegramError("non_json_response", status=response.status_code, uncertain=True) from exc
+        if not isinstance(data, dict):
+            raise TelegramError("invalid_response_shape", status=response.status_code, uncertain=True)
         if not data.get("ok"):
+            # Server errors can occur after an external side effect.
+            if response.status_code >= 500:
+                raise TelegramError("server_result_unconfirmed", status=response.status_code, uncertain=True)
             params = data.get("parameters") or {}
             raise TelegramError(
                 str(data.get("description", "telegram_error"))[:150],
@@ -105,8 +110,7 @@ class TelegramClient:
             "message_id": message_id, "text": text[:4000],
             "link_preview_options": {"is_disabled": True},
         }
-        if markup:
-            data["reply_markup"] = markup
+        data["reply_markup"] = markup or {"inline_keyboard": []}
         return self.call("editMessageText", data)
 
     def set_webhook(self, url: str, secret: str, allowed_updates=None):

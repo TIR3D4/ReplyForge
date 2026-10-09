@@ -15,15 +15,17 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import case, delete, desc, func, or_, select, text
+from sqlalchemy import case, delete, desc, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 
+from .http_security import RequestBoundary
 from .config import ConfigError, Settings, load_playbook
 from .database import session_factory, session_scope
 from .agent import AIEngine
 from .models import (
-    Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, KnowledgeSuggestion, Message, Outbox, Ticket, TicketNote, OperatorDraft, utcnow
+    AIUsage, Operator, Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, KnowledgeSuggestion, Message, Outbox, Ticket, TicketNote, OperatorDraft, utcnow
 )
 from .security import constant_time_equal, fingerprint, redact, subscription_token_fingerprint
 from .playbooks import active_version, activate_version, effective_playbook, save_playbook
@@ -65,20 +67,67 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 engine.dispose()
 
     app = FastAPI(
-        title="ReplyForge", version="1.1.0rc1", docs_url=None, redoc_url=None,
+        title="ReplyForge", version="1.2.0rc1", docs_url=None, redoc_url=None,
         lifespan=lifespan,
     )
+
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    async def admin_error(request, status_code, message, headers=None):
+        playbook = request.app.state.playbook
+        return templates.TemplateResponse(request, "error.html", {
+            "locale": playbook.get("locale", "en"), "brand": playbook["brand"],
+            "status_code": status_code, "message": message,
+        }, status_code=status_code, headers=headers)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def readable_http_error(request, exc):
+        if request.url.path.startswith('/admin') and 'text/html' in request.headers.get('accept', ''):
+            return await admin_error(request, exc.status_code, str(exc.detail), exc.headers)
+        return await http_exception_handler(request, exc)
+
+    @app.exception_handler(RequestValidationError)
+    async def readable_validation_error(request, exc):
+        if request.url.path.startswith('/admin') and 'text/html' in request.headers.get('accept', ''):
+            return await admin_error(request, 422, "Some fields are missing or invalid. Review the form and try again.")
+        return await request_validation_exception_handler(request, exc)
+
+    app.add_middleware(RequestBoundary)
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
     def secret_token(request: Request):
         return request.app.state.settings.binding_pepper
 
     def authenticate(request: Request, credentials: HTTPBasicCredentials = Depends(basic)):
         s = request.app.state.settings
+        from .login_guard import attempt, success
+        throttle_key = attempt(request.app.state.factory,
+                               request.client.host if request.client else 'unknown', s.binding_pepper)
+        if throttle_key is None:
+            raise HTTPException(429, detail="Too many login attempts; retry in five minutes", headers={"Retry-After": "300"})
         good_user = constant_time_equal(s.admin_username, credentials.username)
         good_password = constant_time_equal(s.admin_password, credentials.password)
-        if not (good_user and good_password):
+        role = "admin" if good_user and good_password else None
+        if role is None:
+            from .operators import verify_password
+            with session_scope(request.app.state.factory) as session:
+                staff = session.scalar(select(Operator).where(Operator.username == credentials.username))
+                if staff and staff.enabled and verify_password(credentials.password, staff.password_hash):
+                    role = staff.role
+        if role is None:
             raise HTTPException(status_code=401, detail="Invalid credentials",
                                 headers={"WWW-Authenticate": "Basic"})
+        success(request.app.state.factory, throttle_key)
+        request.state.username = credentials.username
+        request.state.role = role
+        if role != "admin":
+            from .operators import operator_route_allowed
+            if request.url.path == "/admin" and request.method == "GET":
+                raise HTTPException(status_code=303, headers={"Location": "/admin/tickets"})
+            if not operator_route_allowed(request.method, request.url.path):
+                raise HTTPException(403, detail="Administrator role required")
         return credentials.username
 
     def csrf(request: Request, submitted: str):
@@ -122,8 +171,6 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             raise HTTPException(status_code=500, detail="Configured webhook path mismatch")
         if telegram_secret is None or not constant_time_equal(s.webhook_secret, telegram_secret):
             raise HTTPException(status_code=403, detail="Forbidden")
-        if int(request.headers.get("content-length") or "0") > 262144:
-            raise HTTPException(status_code=413, detail="Update too large")
         update_id = payload.get("update_id")
         if type(update_id) is not int or update_id < 0:
             raise HTTPException(status_code=400, detail="Invalid update_id")
@@ -280,8 +327,11 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 or not category.strip() or len(category) > 50 or len(assignee) > 100):
             raise HTTPException(422, detail="Invalid ticket metadata")
         with session_scope(request.app.state.factory) as session:
-            ticket = session.scalar(select(Ticket).where(
-                Ticket.id == ticket_id).with_for_update())
+            ticket = session.get(Ticket, ticket_id)
+            if ticket is not None:
+                # Same order as delivery: conversation first, then ticket.
+                session.get(Conversation, ticket.conversation_id, with_for_update=True)
+                session.refresh(ticket, with_for_update=True)
             if ticket is None:
                 raise HTTPException(404, detail="Ticket not found")
             if ticket.status == "closed":
@@ -328,6 +378,9 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         csrf(request, csrf_token)
         with session_scope(request.app.state.factory) as session:
             ticket = session.get(Ticket, ticket_id)
+            if ticket is not None:
+                session.get(Conversation, ticket.conversation_id, with_for_update=True)
+                session.refresh(ticket, with_for_update=True)
             if ticket is None:
                 raise HTTPException(404, detail="Ticket not found")
             if ticket.status != "closed":
@@ -351,7 +404,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
     @app.get("/admin/conversations/{conversation_id}", response_class=HTMLResponse)
     def conversation_detail(request: Request, conversation_id: int, _=Depends(authenticate)):
         with session_scope(request.app.state.factory) as session:
-            conv = session.get(Conversation, conversation_id)
+            conv = session.get(Conversation, conversation_id, with_for_update=True)
             if conv is None:
                 raise HTTPException(404)
             messages = session.scalars(select(Message).where(
@@ -513,7 +566,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
         """Operator-only, cost-bounded draft; deliberately never sends to Telegram."""
         csrf(request, csrf_token)
         with session_scope(request.app.state.factory) as session:
-            conv = session.get(Conversation, conversation_id)
+            conv = session.get(Conversation, conversation_id, with_for_update=True)
             if conv is None:
                 raise HTTPException(404, detail="Conversation not found")
             history = list(reversed(session.scalars(select(Message).where(
@@ -529,7 +582,8 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             locale = effective_playbook(
                 session, request.app.state.playbook,
             )[0].get("locale", "en")
-            settings = request.app.state.settings
+            from .ai_policy import effective_settings
+            settings = effective_settings(session, request.app.state.settings)
 
             def allow_call():
                 if not settings.ai_api_key:
@@ -547,7 +601,9 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                 session.flush()
                 return True
 
-            ai = AIEngine(settings, allow_call=allow_call)
+            from .budget import BudgetLedger
+            ai = AIEngine(settings, allow_call=allow_call,
+                          ledger=BudgetLedger(request.app.state.factory, settings, f"chat:{conversation_id}"))
             proposed, source = ai.operator_draft(
                 history, knowledge, locale=locale,
                 ticket_reason=ticket.category if ticket else "",
@@ -593,7 +649,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
     @app.post("/admin/conversations/{conversation_id}/reply")
     def operator_reply(request: Request, conversation_id: int,
                        message: str = Form(...), csrf_token: str = Form(...),
-                       draft_id: int | None = Form(None),
+                       draft_id: int | None = Form(None), return_to: str = Form(''),
                        _=Depends(authenticate)):
         csrf(request, csrf_token)
         if not message.strip() or len(message) > 3500:
@@ -695,6 +751,8 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             session.execute(delete(Ticket).where(Ticket.conversation_id == conv.id))
             session.execute(delete(Binding).where(
                 Binding.customer_chat_id == conv.chat_id))
+            # Retain aggregate financial accounting without a customer association.
+            session.execute(update(AIUsage).where(AIUsage.scope == f"chat:{conv.id}").values(scope="erased"))
             session.execute(delete(Conversation).where(Conversation.id == conv.id))
             session.add(Audit(
                 actor="operator", action="privacy_erasure",
@@ -706,7 +764,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
     def takeover(request: Request, conversation_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
         csrf(request, csrf_token)
         with session_scope(request.app.state.factory) as session:
-            conv = session.get(Conversation, conversation_id)
+            conv = session.get(Conversation, conversation_id, with_for_update=True)
             if conv is None:
                 raise HTTPException(404)
             conv.owner = "human"
@@ -718,7 +776,7 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
     def resume(request: Request, conversation_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
         csrf(request, csrf_token)
         with session_scope(request.app.state.factory) as session:
-            conv = session.get(Conversation, conversation_id)
+            conv = session.get(Conversation, conversation_id, with_for_update=True)
             if conv is None:
                 raise HTTPException(404)
             conv.owner = "ai"
@@ -846,6 +904,9 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             raise HTTPException(422, detail="Resolution summary exceeds 2000 characters")
         with session_scope(request.app.state.factory) as session:
             ticket = session.get(Ticket, ticket_id)
+            if ticket is not None:
+                session.get(Conversation, ticket.conversation_id, with_for_update=True)
+                session.refresh(ticket, with_for_update=True)
             if ticket is None:
                 raise HTTPException(404)
             ticket.status = "closed"
@@ -876,6 +937,10 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
                               action="ticket_closed", detail=str(ticket.id)))
         return RedirectResponse("/admin/tickets", status_code=303)
 
+    from .inbox import register_inbox
+    register_inbox(app, authenticate, csrf_value, templates)
+    from .admin_modules import register_admin_modules
+    register_admin_modules(app, authenticate, csrf, csrf_value, templates)
     return app
 
 

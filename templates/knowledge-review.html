@@ -1,19 +1,6 @@
-<!DOCTYPE html>
-<html lang="{{ locale }}" dir="{{ 'rtl' if locale == 'fa' else 'ltr' }}">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ReplyForge · Knowledge Review</title>
-<style>
-:root{color-scheme:dark;font-family:system-ui,-apple-system,sans-serif;background:#0b1120;color:#edf5ff}
-body{max-width:960px;margin:0 auto;padding:24px}a{color:#9cdef0}
-.card{border:1px solid #33435c;background:#152138;border-radius:15px;padding:20px;margin:16px 0}
-label{display:block;margin-bottom:10px;color:#bdc9d8}
-textarea{display:block;width:100%;box-sizing:border-box;background:#0b1527;color:#f1f7ff;
-border:1px solid #43546b;border-radius:9px;padding:12px;margin-top:7px;font:inherit;resize:vertical}
-button{color:white;background:#19707a;border:0;border-radius:9px;padding:11px 20px;cursor:pointer}
-button.secondary{background:#46506b}.row{display:flex;gap:10px;flex-wrap:wrap}
-.warn{background:#3c3023;color:#eed6a7;padding:14px;border-radius:10px}
-small{color:#91abc8}
-</style></head><body>
+{% extends "base.html" %}
+{% block content %}
+
 <a href="/admin">← {{ 'داشبورد' if locale == 'fa' else 'Dashboard' }}</a>
 <h1>📚 {{ 'مرور دانش استخراج‌شده' if locale == 'fa' else 'Review knowledge candidates' }}</h1>
 <p>{{ 'پاسخ‌های واقعی اپراتورها می‌توانند به دانشنامه تبدیل شوند، اما فقط بعد از بازبینی و تأیید شما.' if locale == 'fa' else 'Turn resolved support cases into approved answers; nothing is published automatically.' }}</p>
@@ -35,4 +22,5 @@ small{color:#91abc8}
 {% else %}
 <section class="card">{{ 'پیشنهاد جدیدی وجود ندارد.' if locale == 'fa' else 'There are no pending suggestions.' }}</section>
 {% endfor %}
-</body></html>
+
+{% endblock %}

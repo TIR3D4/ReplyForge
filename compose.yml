@@ -14,6 +14,11 @@ services:
     restart: unless-stopped
   init:
     build: .
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    stop_grace_period: 30s
     command: ["replyforge", "init"]
     env_file: .env
     environment:
@@ -24,18 +29,49 @@ services:
     restart: "no"
   api:
     build: .
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    stop_grace_period: 30s
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://replyforge:${POSTGRES_PASSWORD}@db:5432/replyforge
     ports:
       - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
     depends_on:
       init:
         condition: service_completed_successfully
     restart: unless-stopped
   worker:
     build: .
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    stop_grace_period: 30s
     command: ["replyforge", "worker"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://replyforge:${POSTGRES_PASSWORD}@db:5432/replyforge
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+  insight:
+    profiles: ["insight"]
+    build: .
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    stop_grace_period: 30s
+    command: ["replyforge", "insight-worker"]
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://replyforge:${POSTGRES_PASSWORD}@db:5432/replyforge
@@ -46,6 +82,11 @@ services:
   catalog:
     profiles: ["vpn"]
     build: .
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    stop_grace_period: 30s
     command: ["replyforge", "sync-daemon", "--provider", "both", "--limit", "2000", "--interval-minutes", "60"]
     env_file: .env
     environment:

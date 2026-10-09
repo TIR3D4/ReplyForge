@@ -8,7 +8,7 @@ from sqlalchemy import select
 from replyforge.app import build_app
 from replyforge.database import session_scope
 from replyforge.models import (
-    Audit, Binding, BusinessConnection, Conversation, Event, KnowledgeSuggestion,
+    AIUsage, Audit, Binding, BusinessConnection, Conversation, Event, KnowledgeSuggestion,
     Message, OperatorDraft, Outbox, Ticket, TicketNote, utcnow,
 )
 from replyforge.security import fingerprint
@@ -57,6 +57,11 @@ def test_erasure_requires_double_confirmation_and_removes_customer_records(
 ):
     with session_scope(database) as db:
         cid = seed(db, test_settings)
+    from dataclasses import replace
+    from replyforge.budget import BudgetLedger
+    ledger = BudgetLedger(database, replace(test_settings, ai_input_price='1', ai_output_price='1'), f'chat:{cid}')
+    usage_id = ledger.reserve('synthetic', 100, 10)
+    assert usage_id
     app = build_app(test_settings, factory=database, telegram=fake_telegram)
     auth = (test_settings.admin_username, test_settings.admin_password)
     with TestClient(app) as client:
@@ -76,6 +81,8 @@ def test_erasure_requires_double_confirmation_and_removes_customer_records(
         for cls in (Conversation, Message, Outbox, Ticket, TicketNote,
                     KnowledgeSuggestion, OperatorDraft, Binding):
             assert db.scalar(select(cls)) is None
+        assert db.get(AIUsage, usage_id).scope == "erased"
+        assert db.get(AIUsage, usage_id).reserved_microusd == 110
         ev = db.get(Event, 888)
         assert ev.status == "done"
         assert ev.payload == {}

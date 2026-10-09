@@ -53,7 +53,7 @@ def is_fa(playbook):
 
 def root_menu(playbook: dict) -> Proposal:
     return Proposal(
-        playbook["welcome"],
+        playbook["welcome"] + ("\n\n📣 " + playbook['service_notice'] if playbook.get('service_notice') else ''),
         [(button["label"], button["action"]) for button in playbook["menu"]],
     )
 
@@ -211,7 +211,8 @@ def accept_input(session: Session, conv: Conversation, playbook: dict, ai: AIEng
         info = dict(conv.state or {})
         info["recent_slots"] = {**info.get("recent_slots", {}), **slots}
         conv.state = info
-    if any(hint in lowered for hint in ("پشتیبان انسانی", "اپراتور انسانی", "human support", "speak to human")):
+    if (lowered.strip() in ("اپراتور", "پشتیبان", "human", "operator", "agent")
+            or any(hint in lowered for hint in ("پشتیبان انسانی", "اپراتور انسانی", "human support", "speak to human"))):
         return human(session, conv, playbook)
     if lowered.strip() in ("منو", "منوی اصلی", "menu", "/start"):
         return apply_action(session, conv, playbook, ai, settings, "home")
@@ -299,6 +300,7 @@ def build_markup(conversation: Conversation, actions: list[tuple[str, str]]):
     nonce = secrets.token_hex(4)
     data = dict(conversation.state or {})
     data["menu_nonce"] = nonce
+    data["menu_issued_at"] = datetime.now(timezone.utc).timestamp()
     data["menu_actions"] = [action for _, action in actions]
     conversation.state = data
     buttons = [
@@ -320,6 +322,9 @@ def callback_action(conv: Conversation, payload: str) -> str | None:
     if len(pieces) != 3 or pieces[0] != "rf":
         return None
     state = conv.state or {}
+    issued = state.get("menu_issued_at")
+    if not isinstance(issued, (int, float)) or not 0 <= datetime.now(timezone.utc).timestamp() - issued <= 1800:
+        return None
     if pieces[1] != state.get("menu_nonce"):
         return None
     try:

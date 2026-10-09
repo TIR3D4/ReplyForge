@@ -14,3 +14,8 @@ coverage.xml
 .coverage
 .idea/
 .DS_Store
+
+artifacts/
+backups/
+*.dump
+*.partial
