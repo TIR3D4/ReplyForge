@@ -1,6 +1,6 @@
 # Operations & production deployment
 
-For the development branch, use the current [staging and upgrade runbook](UPGRADE_READINESS_BRANCH.md); schema head is `0011_release_runtime`. Review [READINESS.md](READINESS.md) before activation.
+For the development branch, use the current [staging and upgrade runbook](UPGRADE_READINESS_BRANCH.md); schema head is `0012_reviewed_media`. Review [READINESS.md](READINESS.md) before activation.
 
 For 1.2.0rc1 use [the current Persian installer guide](INSTALL_1_2_FA.md) and [release checklist](RELEASE_1_2_CHECKLIST.md).
 
@@ -105,7 +105,7 @@ DATA_RETENTION_DAYS defaults to 180 (0 disables). The worker periodically scrubs
 
 ## ReplyForge 1.1 upgrade and first-response SLA
 
-Read the step-by-step [upgrade guide](UPGRADE_V1_1.md). The original 1.1 candidate applied 0005–0007; this development branch additionally applies 0008–0011 using the Compose init service. A database backup and staging restore test are required before a live migration.
+Read the step-by-step [upgrade guide](UPGRADE_V1_1.md). The original 1.1 candidate applied 0005–0007; this development branch additionally applies 0008–0012 using the Compose init service. A database backup and staging restore test are required before a live migration.
 
 Customer messages may be coalesced over MESSAGE_DEBOUNCE_MS; maintain only one worker. A queued operator reply is not counted as the first response until Telegram confirms delivery. The worker periodically checks unanswered SLAs independently from ongoing queue work.
 

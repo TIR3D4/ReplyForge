@@ -17,6 +17,6 @@ with zipfile.ZipFile(archive) as bundle:
         assert name != '.env' and '..' not in Path(name).parts
         assert hashlib.sha256(bundle.read(prefix+'/'+name)).hexdigest() == digest, name
     for required in ['compose.yml','Dockerfile','requirements.lock','scripts/install.py','scripts/setup.py',
-                     'templates/inbox.html','static/admin.css','migrations/versions/0011_release_runtime.py']:
+                     'templates/inbox.html','static/admin.css','migrations/versions/0011_release_runtime.py','migrations/versions/0012_reviewed_media.py']:
         assert prefix+'/'+required in bundle.namelist()
 print('PASS: installation archive, required runtime files and SHA-256 manifest')

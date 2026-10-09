@@ -66,7 +66,7 @@ def main():
             run('exec','-T','db','createdb','-U','replyforge','restore_check')
             run('exec','-T','db','pg_restore','-U','replyforge','-d','restore_check',input=dump)
             restored = run('exec','-T','db','psql','-U','replyforge','-d','restore_check','-Atc','SELECT version_num FROM alembic_version',capture_output=True,text=True).stdout.strip()
-            assert restored == '0011_release_runtime', restored
+            assert restored == '0012_reviewed_media', restored
             print('PASS: migrations, API/worker readiness, restart, dump and isolated restore')
         except Exception:
             run('ps', '--all')

@@ -25,7 +25,7 @@ def upgrade():
     op.create_table('insight_tasks', sa.Column('id', sa.Integer(), primary_key=True),
         sa.Column('import_id', sa.Integer(), sa.ForeignKey('insight_imports.id'), nullable=False),
         sa.Column('candidate_id', sa.Integer(), sa.ForeignKey('insight_candidates.id'), nullable=False, unique=True),
-        sa.Column('status', sa.String(20), nullable=False), sa.Column('image_data', sa.LargeBinary(), nullable=True), sa.Column('result', sa.JSON(), nullable=False),
+        sa.Column('status', sa.String(20), nullable=False), sa.Column('result', sa.JSON(), nullable=False),
         sa.Column('claimed_at', sa.DateTime(timezone=True)), sa.Column('created_at', sa.DateTime(timezone=True), nullable=False))
     op.create_index('ix_insight_tasks_import_id', 'insight_tasks', ['import_id'])
 

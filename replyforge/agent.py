@@ -134,7 +134,7 @@ class AIEngine:
                     self.ledger.settle(reservation, response.json().get('usage'))
                 observation = response.json()["choices"][0]["message"]["content"]
                 return redact(str(observation))[:650] if observation else None
-        except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError) as exc:
+        except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError, AttributeError) as exc:
             if reservation:
                 self.ledger.settle(reservation, None)
             log.warning("screenshot analysis unavailable: %s", type(exc).__name__)
@@ -164,7 +164,7 @@ class AIEngine:
                     self.ledger.settle(reservation, None)  # Audio pricing is not inferred from text tokens.
                 transcript = response.json().get("text")
                 return redact(str(transcript))[:1200] if transcript else None
-        except (httpx.HTTPError, ValueError, TypeError) as exc:
+        except (httpx.HTTPError, ValueError, TypeError, AttributeError) as exc:
             if reservation:
                 self.ledger.settle(reservation, None)
             log.warning("voice transcription unavailable: %s", type(exc).__name__)

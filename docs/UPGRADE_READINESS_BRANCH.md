@@ -47,7 +47,7 @@ docker compose logs --tail=100 init api worker
 curl --fail http://127.0.0.1:8080/readyz
 ```
 
-Current migration head: `0011_release_runtime`. This branch adds `0008_delivery_attempts`, `0009_insight` , `0010_operators` and `0011_release_runtime` to the existing migration chain. Never use `alembic stamp` to hide a failed migration. All application containers drop capabilities and have read-only roots; writable temporary files belong in `/tmp`.
+Current migration head: `0012_reviewed_media`. This branch adds `0008_delivery_attempts`, `0009_insight` , `0010_operators` , `0011_release_runtime` and `0012_reviewed_media` to the existing migration chain. Never use `alembic stamp` to hide a failed migration. All application containers drop capabilities and have read-only roots; writable temporary files belong in `/tmp`.
 
 ## Restore rehearsal and rollback
 
