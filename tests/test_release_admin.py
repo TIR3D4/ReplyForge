@@ -37,3 +37,28 @@ def test_service_notice_requires_admin_and_reaches_menu(database, test_settings,
         token = re.search(r'name="csrf_token" value="([^"]+)', page.text)[1]
         assert client.post('/admin/service-notice', data={'csrf_token':token,'message':'Maintenance until 14:00'}).status_code == 200
     assert 'Maintenance' in root_menu({'welcome':'Hello','menu':[], 'service_notice':'Maintenance'}).text
+
+
+def test_image_analysis_requires_review_and_does_not_publish(database, test_settings, fake_telegram):
+    import base64
+    from replyforge.models import InsightTask, Knowledge
+    task_id = seed(database)
+    with session_scope(database) as db:
+        task = db.get(InsightTask, task_id)
+        task.status = 'failed'
+        candidate_id = task.candidate_id
+    # Synthetic 1x1 PNG; no user image or personal data.
+    encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+    with TestClient(build_app(test_settings, factory=database, telegram=fake_telegram)) as client:
+        client.auth = (test_settings.admin_username, test_settings.admin_password)
+        token = re.search(r'name="csrf_token" value="([^"]+)', client.get('/admin/insight').text)[1]
+        data = {'csrf_token':token, 'image_base64':'data:image/png;base64,'+encoded}
+        url = f'/admin/insight/{candidate_id}/image'
+        assert client.post(url, data=data).status_code == 422
+        assert client.post(url, data={**data,'privacy_reviewed':'true','image_base64':'data:image/png;base64,bm90LXBuZw=='}).status_code == 422
+        assert client.post(url, data={**data,'privacy_reviewed':'true'}).status_code == 200
+        assert client.post(url, data={**data,'privacy_reviewed':'true'}).status_code == 409
+    with session_scope(database) as db:
+        task = db.get(InsightTask, task_id)
+        assert task.status == 'pending' and task.image_data == base64.b64decode(encoded)
+        assert not db.scalars(select(Knowledge)).all()

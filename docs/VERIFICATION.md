@@ -1,3 +1,13 @@
+# Current candidate verification — 2026-10-09
+
+The first 1.2.0rc1 batch at [`61e83d0`](https://github.com/TIR3D4/ReplyForge/commit/61e83d04385045a1a74d4ebc09143f96523a9093) passed all five jobs in [run 37918191146](https://github.com/TIR3D4/ReplyForge/actions/runs/37918191146): Python/PostgreSQL, real Chrome, Docker restart/restore including Insight, dependency audit and installation-package verification. Artifacts contain test XML, screenshots, audit JSON and source ZIP/checksum.
+
+The subsequent selective-image/privacy changes passed **151 local tests, 7 skipped** (5 PostgreSQL, 2 browser executed separately in Actions), compileall and Ruff. They add explicit image-consent/queue tests, failure handling, pixel deletion, budget-customer unlinking and a browser canvas submission regression. Consult the final commit's Actions before installation; an earlier green run does not validate a later commit. One TestClient deprecation warning remains.
+
+Live Telegram, actual panel versions, provider billing/quality, long-running load and independent penetration tests remain unperformed. See [the current checklist](RELEASE_1_2_CHECKLIST.md).
+
+---
+
 # Verification record — 2026-10-08
 
 No real customer data or live Telegram/panel/provider credentials were used.

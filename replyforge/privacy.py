@@ -82,7 +82,7 @@ def prune_history(session: Session, retention_days: int, *, batch_size: int = 25
         item.status = "expired"
         task = session.scalar(select(InsightTask).where(InsightTask.candidate_id == item.id))
         if task:
-            task.result, task.status = {}, 'expired'
+            task.result, task.status, task.image_data = {}, 'expired', None
     counts["insight_candidates"] = len(candidates)
     # Workflow answers/media references also contain customer data. Preserve
     # states involved in unresolved sends and recent conversations; scrub idle

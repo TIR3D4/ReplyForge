@@ -38,6 +38,8 @@ def main() -> None:
         print("Database:", engine.dialect.name)
         with session_scope(factory) as db:
             print("Migration:", db.scalar(text("SELECT version_num FROM alembic_version")))
+            from .ai_policy import effective_settings
+            s = effective_settings(db, s)
             heartbeat = db.get(Control, 'worker_heartbeat')
             print("Worker heartbeat:", heartbeat.value if heartbeat else "not received")
         print("External credentials: Telegram=", bool(s.bot_token), "AI=", bool(s.ai_api_key))

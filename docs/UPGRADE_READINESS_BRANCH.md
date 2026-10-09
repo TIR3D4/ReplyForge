@@ -9,7 +9,7 @@ Use Docker Engine with Compose v2 and a domain pointing to the VPS. Expose only 
 ```sh
 git clone https://github.com/TIR3D4/ReplyForge.git
 cd ReplyForge
-git checkout development/production-readiness
+git checkout development/installable-v1.2
 python3 scripts/setup.py --preset generic
 # For AzadBird use --preset azadbird instead.
 # Privately edit .env: BOT_TOKEN, WEBHOOK_PUBLIC_URL and desired optional settings.
@@ -29,7 +29,7 @@ Connect the bot through Telegram Business settings on the existing business acco
 ## Existing installation upgrade
 
 1. Choose a reviewed commit with successful CI. Record `git rev-parse HEAD` and preserve the old image tag, `.env` and playbook privately.
-2. Pause automated replies in the dashboard. Arrange human coverage. Stop the worker and API before migration so old code does not run against a changing schema.
+2. Pause automated replies in the dashboard. Arrange human coverage. Stop the worker and API (and optional insight/catalog services) before migration so old code does not run against a changing schema.
 3. Back up PostgreSQL and test restoring the dump to a separate database. The dump and environment secrets are sensitive. Never restore over production as a test.
 
 ```sh
@@ -37,7 +37,7 @@ umask 077
 docker compose stop worker api
 docker compose exec -T db pg_dump -U replyforge -d replyforge -Fc > replyforge-before-upgrade.dump
 # Copy the dump to protected offsite storage and verify a separate staging restore.
-git fetch origin development/production-readiness
+git fetch origin development/installable-v1.2
 # Replace REVIEWED_SHA with the reviewed, green commit; do not deploy a moving head blindly.
 git checkout REVIEWED_SHA
 docker compose build
@@ -47,7 +47,7 @@ docker compose logs --tail=100 init api worker
 curl --fail http://127.0.0.1:8080/readyz
 ```
 
-Current migration head: `0010_operators`. This branch adds `0008_delivery_attempts`, `0009_insight` and `0010_operators` to the existing migration chain. Never use `alembic stamp` to hide a failed migration. All application containers drop capabilities and have read-only roots; writable temporary files belong in `/tmp`.
+Current migration head: `0011_release_runtime`. This branch adds `0008_delivery_attempts`, `0009_insight` , `0010_operators` and `0011_release_runtime` to the existing migration chain. Never use `alembic stamp` to hide a failed migration. All application containers drop capabilities and have read-only roots; writable temporary files belong in `/tmp`.
 
 ## Restore rehearsal and rollback
 

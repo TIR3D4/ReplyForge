@@ -11,6 +11,8 @@ class RequestBoundary:
             return await self.app(scope, receive, send)
         path = scope.get("path", "")
         limit = 16 * 1024 * 1024 if path == "/admin/insight/import" else 262144
+        if path.startswith('/admin/insight/') and path.endswith('/image'):
+            limit = 3 * 1024 * 1024
         chunks = []
         total = 0
         while True:

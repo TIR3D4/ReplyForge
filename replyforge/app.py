@@ -17,7 +17,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import case, delete, desc, func, or_, select, text
+from sqlalchemy import case, delete, desc, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 
 from .http_security import RequestBoundary
@@ -25,7 +25,7 @@ from .config import ConfigError, Settings, load_playbook
 from .database import session_factory, session_scope
 from .agent import AIEngine
 from .models import (
-    Operator, Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, KnowledgeSuggestion, Message, Outbox, Ticket, TicketNote, OperatorDraft, utcnow
+    AIUsage, Operator, Audit, Binding, BusinessConnection, Control, Conversation, Event, Knowledge, KnowledgeSuggestion, Message, Outbox, Ticket, TicketNote, OperatorDraft, utcnow
 )
 from .security import constant_time_equal, fingerprint, redact, subscription_token_fingerprint
 from .playbooks import active_version, activate_version, effective_playbook, save_playbook
@@ -751,6 +751,8 @@ def build_app(config: Settings | None = None, *, factory=None, telegram=None) ->
             session.execute(delete(Ticket).where(Ticket.conversation_id == conv.id))
             session.execute(delete(Binding).where(
                 Binding.customer_chat_id == conv.chat_id))
+            # Retain aggregate financial accounting without a customer association.
+            session.execute(update(AIUsage).where(AIUsage.scope == f"chat:{conv.id}").values(scope="erased"))
             session.execute(delete(Conversation).where(Conversation.id == conv.id))
             session.add(Audit(
                 actor="operator", action="privacy_erasure",

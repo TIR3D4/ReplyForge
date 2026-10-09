@@ -1,4 +1,6 @@
-# Production-readiness audit and delivery record
+# Historical production-readiness audit and delivery record
+
+**Superseded for current features by [1.2.0rc1 checklist](RELEASE_1_2_CHECKLIST.md).** This document records the 1.1-based audit. The newer candidate implements persistent budget reservations, login throttling, guided graph creation, a unified inbox and durable/selective-image Insight tasks. Residual live acceptance and full-scope gaps remain; use the current checklist, module guide and verification report.
 
 Audit baseline: `e2243763462470cf3bcd2edd185a5dac70c5d696` (1.1.0rc1).
 Development branch: `development/production-readiness`.

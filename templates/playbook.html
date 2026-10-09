@@ -1,15 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
+
+
+
+<a href="/admin">{{ '← داشبورد' if locale == 'fa' else '← Dashboard' }}</a>
+<h1>{{ 'ویرایش هوشمند منو و گردش‌کار' if locale == 'fa' else 'Support workflow editor' }}</h1>
 <section class="panel"><h2>{{ 'ساخت گردش‌کار جدید' if fa else 'Create a workflow' }}</h2>
 <form method="post" action="/admin/playbook/create-flow"><input type="hidden" name="csrf_token" value="{{ csrf }}"><label>{{ 'شناسه لاتین یکتا' if fa else 'Unique workflow ID' }}<input name="name" pattern="[A-Za-z][A-Za-z0-9_-]{0,49}" required></label><label>{{ 'عنوان منو' if fa else 'Menu title' }}<input name="title" maxlength="80" required></label><label>{{ 'اولین سؤال' if fa else 'First question' }}<textarea name="prompt" maxlength="4000" required></textarea></label><button type="submit">{{ 'ساخت و افزودن به منو' if fa else 'Create and add to menu' }}</button></form></section>
 <section class="panel"><h2>{{ 'ساخت یا جایگزینی مرحله' if fa else 'Create or replace a step' }}</h2><p>{{ 'ابتدا مرحله مقصد را بسازید، سپس مسیر ورودی را به آن وصل کنید. تغییر نامعتبر ذخیره نمی‌شود.' if fa else 'Create destination steps first, then connect incoming transitions. Invalid graphs are rejected.' }}</p>
 <form method="post" action="/admin/playbook/build-step"><input type="hidden" name="csrf_token" value="{{ csrf }}"><label>{{ 'گردش‌کار' if fa else 'Workflow' }}<select name="flow">{% for name in config.workflows %}<option>{{ name }}</option>{% endfor %}</select></label><label>{{ 'شناسه مرحله' if fa else 'Step ID' }}<input name="step" pattern="[A-Za-z][A-Za-z0-9_-]{0,49}" required></label>
 <label>{{ 'نوع مرحله' if fa else 'Step type' }}<select name="kind">{% for kind in ['text','choice','subscription','photo','question','handoff','complete','knowledge'] %}<option>{{ kind }}</option>{% endfor %}</select></label><label>{{ 'متن راهنما' if fa else 'Prompt' }}<textarea name="prompt" maxlength="4000"></textarea></label><label>{{ 'نام اطلاعات ذخیره‌شده' if fa else 'Saved field name' }}<input name="field" maxlength="80"></label><label>{{ 'شناسه مرحله بعد (برای ورودی غیرگزینه‌ای)' if fa else 'Next step ID (non-choice input)' }}<input name="target" maxlength="50"></label><label class="check"><input type="checkbox" name="start" value="true">{{ 'مرحله شروع شود' if fa else 'Make this the starting step' }}</label>
 <details><summary>{{ 'گزینه‌های مرحله انتخابی' if fa else 'Choice options' }}</summary><p>{{ 'ردیف‌های خالی نادیده گرفته می‌شوند.' if fa else 'Empty rows are ignored.' }}</p>{% for i in range(6) %}<div class="grid-three"><label>{{ 'مقدار' if fa else 'Value' }}<input name="option_value" maxlength="80"></label><label>{{ 'متن دکمه' if fa else 'Button label' }}<input name="option_label" maxlength="80"></label><label>{{ 'مرحله مقصد' if fa else 'Destination' }}<input name="option_target" maxlength="50"></label></div>{% endfor %}</details><button type="submit">{{ 'اعتبارسنجی و ذخیره مرحله' if fa else 'Validate and save step' }}</button></form></section>
-
-
-<a href="/admin">{{ '← داشبورد' if locale == 'fa' else '← Dashboard' }}</a>
-<h1>{{ 'ویرایش هوشمند منو و گردش‌کار' if locale == 'fa' else 'Support workflow editor' }}</h1>
 <p>{{ brand }} · {{ 'نسخه فعال' if locale == 'fa' else 'Active version' }}:
 <span class="pill">{{ version if version else 'file default' }}</span></p>
 <div class="panel">

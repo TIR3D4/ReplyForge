@@ -29,6 +29,11 @@ def test_responsive_admin_and_policy_submission(database, test_settings, fake_te
         db.add(Ticket(conversation_id=cid, status='open', priority='high', category='connection'))
         db.add(Message(conversation_id=cid, direction='in', kind='text',
                        content='اتصال روی آیفون برقرار نمی‌شود. Please help me update my subscription.'))
+    from test_insight_worker import seed
+    from replyforge.models import InsightTask
+    task_id = seed(database)
+    with session_scope(database) as db:
+        db.get(InsightTask, task_id).status = 'failed'
     app = build_app(settings, factory=database, telegram=fake_telegram)
     sock = socket.socket()
     sock.bind(('127.0.0.1', 0))
@@ -67,6 +72,37 @@ def test_responsive_admin_and_policy_submission(database, test_settings, fake_te
             page.locator('form[action="/admin/agent/test"] button').click()
             page.wait_for_url(f'http://127.0.0.1:{port}/admin/agent/test')
             assert 'flow:payment' in page.locator('main').inner_text()
+            page.goto(f'http://127.0.0.1:{port}/admin/insight')
+            editor = page.locator('.image-editor').first
+            editor.locator('summary').click()
+            # Build a synthetic local PNG; no external image or customer data.
+            import base64
+            encoded = page.evaluate("""() => { const c = document.createElement('canvas'); c.width=100; c.height=100; const x=c.getContext('2d'); x.fillStyle='#ff0000'; x.fillRect(0,0,100,100); return c.toDataURL('image/png').split(',')[1]; }""")
+            upload = {'name':'synthetic.png','mimeType':'image/png','buffer':base64.b64decode(encoded)}
+            editor.locator('.image-input').set_input_files(upload)
+            canvas = editor.locator('canvas')
+            from playwright.sync_api import expect
+            expect(canvas).to_be_visible()
+            consent = editor.locator('[name=privacy_reviewed]')
+            consent.check()
+            editor.locator('.image-reset').click()
+            expect(consent).not_to_be_checked()
+            canvas.scroll_into_view_if_needed()
+            bounds = canvas.bounding_box()
+            page.mouse.move(bounds['x']+10, bounds['y']+10)
+            page.mouse.down()
+            page.mouse.move(bounds['x']+70, bounds['y']+70)
+            page.mouse.up()
+            assert canvas.evaluate("c => Array.from(c.getContext('2d').getImageData(40,40,1,1).data)") == [0,0,0,255]
+            # The original has no form name and cannot be submitted with the form.
+            assert editor.locator('.image-input').get_attribute('name') is None
+            reviewed = canvas.evaluate("c => c.toDataURL('image/png').split(',')[1]")
+            consent.check()
+            page.screenshot(path=str(folder/f'{locale}-360-image-review.png'), full_page=True)
+            editor.locator('[type=submit]').click()
+            page.wait_for_url(f'http://127.0.0.1:{port}/admin/insight?import_id=*')
+            with session_scope(database) as db:
+                assert db.get(InsightTask, task_id).image_data == base64.b64decode(reviewed)
             assert not errors
             browser.close()
     finally:

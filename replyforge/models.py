@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, JSON,
-    String, Text, UniqueConstraint
+    String, Text, UniqueConstraint, LargeBinary
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -239,6 +239,7 @@ class InsightTask(Base):
     import_id: Mapped[int] = mapped_column(ForeignKey('insight_imports.id'), index=True, nullable=False)
     candidate_id: Mapped[int] = mapped_column(ForeignKey('insight_candidates.id'), unique=True, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default='pending', nullable=False)
+    image_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     result: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -271,6 +271,39 @@ def register_admin_modules(app, authenticate, csrf, csrf_value, templates):
             raise HTTPException(409, detail='Export already imported; refresh Insight') from exc
         return RedirectResponse('/admin/insight?import_id=' + str(job_id), 303)
 
+    @app.post('/admin/insight/{candidate_id}/image')
+    def queue_reviewed_image(request: Request, candidate_id: int, image_base64: str = Form(...),
+                             privacy_reviewed: bool = Form(False), csrf_token: str = Form(...), _=Depends(authenticate)):
+        import base64
+        import binascii
+        import struct
+        csrf(request, csrf_token)
+        if not privacy_reviewed or not image_base64.startswith('data:image/png;base64,'):
+            raise HTTPException(422, detail='Review and redact the image before authorizing analysis')
+        try:
+            content = base64.b64decode(image_base64.split(',', 1)[1], validate=True)
+            if not 24 <= len(content) <= 2*1024*1024 or content[:8] != b'\x89PNG\r\n\x1a\n' or content[8:16] != b'\x00\x00\x00\x0dIHDR':
+                raise ValueError()
+            width, height = struct.unpack('>II', content[16:24])
+            if not 1 <= width <= 1600 or not 1 <= height <= 1600:
+                raise ValueError()
+        except (ValueError, binascii.Error, struct.error) as exc:
+            raise HTTPException(422, detail='Use the image editor to create a PNG up to 1600px / 2 MiB') from exc
+        with session_scope(request.app.state.factory) as db:
+            candidate = db.get(InsightCandidate, candidate_id, with_for_update=True)
+            if not candidate or candidate.status != 'pending':
+                raise HTTPException(409, detail='Candidate is not pending review')
+            task = db.scalar(select(InsightTask).where(InsightTask.candidate_id == candidate_id).with_for_update())
+            if task and task.status in ('pending','processing','published'):
+                raise HTTPException(409, detail='Existing analysis must finish first')
+            if not task:
+                task = InsightTask(import_id=candidate.import_id, candidate_id=candidate_id)
+                db.add(task)
+            task.image_data, task.result, task.status = content, {}, 'pending'
+            job_id = candidate.import_id
+            db.add(Audit(actor='admin', action='insight_reviewed_image_queued', detail=str(candidate_id)))
+        return RedirectResponse('/admin/insight?import_id=' + str(job_id), 303)
+
     @app.post('/admin/insight/{candidate_id}/refine')
     def refine_candidate(request: Request, candidate_id: int, csrf_token: str = Form(...), _=Depends(authenticate)):
         csrf(request, csrf_token)

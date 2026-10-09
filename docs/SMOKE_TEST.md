@@ -1,10 +1,10 @@
-# ReplyForge V1.1 — Live acceptance test plan
+# ReplyForge 1.2.0rc1 — Live acceptance test plan
 
 This test plan is a **release gate**, not a claim of prior production validation. Automated tests use simulated Bot API and provider responses. Do the following on a staging Business account with explicit participant permission before enabling ReplyForge for public customers.
 
 ## Prerequisites
 
-- The latest `main` has successful GitHub Actions CI (Python, Postgres, Docker).
+- The exact reviewed commit being installed has successful GitHub Actions CI (Python, Postgres, Docker).
 - Dedicated HTTPS domain and TLS reverse proxy; admin interface restricted to operators.
 - Telegram bot in Business/Secretary mode, with read and reply permissions for test chats.
 - One worker process, database initialized via Alembic, offsite encrypted backups.
@@ -76,3 +76,11 @@ This test plan is a **release gate**, not a claim of prior production validation
 - Full autonomous debugging of live network nodes, or automatic account mutations.
 
 Promote by progressively enabling on test chats, then a limited real-customer cohort, while retaining an immediately accessible admin pause and human support.
+
+## 1.2 additional live gates
+
+- AI-03: Enter known model prices and a small approved budget; validate recorded usage against provider billing. Unknown prices must prevent calls.
+- AI-04: Trigger a provider timeout; the reservation remains and no blind fallback is made.
+- INS-01: Import only authorized/redacted history, refine one candidate with the isolated Insight worker and confirm no automatic knowledge publication.
+- INS-02: Manually mask a synthetic screenshot, submit only after review, check proposed observations and temporary-pixel erasure. Do not use a real receipt for this test.
+- OPS-06: Rehearse a backup from this installation in a separate database and verify both credentials and application data. Synthetic CI restore alone is insufficient.
